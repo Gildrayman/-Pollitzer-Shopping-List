@@ -223,6 +223,43 @@ function QtyStepper({ qty, disabled, onInc, onDec, onSet }) {
   );
 }
 
+// Splits a pasted line into the product and its quantity, so "3 עגבניות",
+// "2 × חלב", "חלב x2" or "בננות - 4" become a name plus a number. A bare number
+// at the end ("דנונה פרו 20") counts only when the rest is a known product, since
+// many product names end in a number. The app's own list ("1 × name (note)")
+// pastes back too: a trailing "(note)" is dropped when the name without it is known.
+function splitImportQty(line, isKnown) {
+  let text = line.trim();
+  let qty = 1;
+  const clamp = (n) => Math.min(20, Math.max(1, n));
+  const lead = text.match(/^(\d{1,2})\s*(?:[x×X*]|יח['׳]?|יחידות)?\s+(.+)$/);
+  const marked = text.match(/^(.+?)\s*(?:[-–:]\s*|[x×X*]\s*|\(\s*)(\d{1,2})\s*(?:יח['׳]?|יחידות)?\s*\)?$/);
+  const unit = text.match(/^(.+?)\s+(\d{1,2})\s*(?:יח['׳]?|יחידות)$/);
+  const bare = text.match(/^(.+?)\s+(\d{1,2})$/);
+  if (isKnown(text)) {
+    // The whole line is a product name as it stands.
+  } else if (lead) {
+    qty = clamp(parseInt(lead[1], 10));
+    text = lead[2].trim();
+  } else if (marked) {
+    qty = clamp(parseInt(marked[2], 10));
+    text = marked[1].trim();
+  } else if (unit) {
+    qty = clamp(parseInt(unit[2], 10));
+    text = unit[1].trim();
+  } else if (bare && isKnown(bare[1].trim())) {
+    qty = clamp(parseInt(bare[2], 10));
+    text = bare[1].trim();
+  }
+  if (!isKnown(text) && text.endsWith(")")) {
+    for (let i = text.indexOf("("); i > 0; i = text.indexOf("(", i + 1)) {
+      const before = text.slice(0, i).trim();
+      if (isKnown(before)) { text = before; break; }
+    }
+  }
+  return { text, qty };
+}
+
 function stripWhatsAppPrefix(line) {
   let s = line.trim();
   s = s.replace(/^\[[^\]]*\]\s*/, "");
@@ -795,15 +832,16 @@ export default function ShoppingList() {
       // Pasted lists often start lines with a bullet or a number ("- ", "• ", "3. ").
       const cleaned = stripWhatsAppPrefix(raw).replace(/^([-–•*·]|\d{1,2}[.)])\s*/, "").trim();
       if (!cleaned) continue;
-      if (cleaned.length < 2 || cleaned.length > 40) continue;
       if (/^(https?:\/\/|<|תמונה|image omitted|video omitted|✏)/i.test(cleaned)) continue;
-      const match = findCatalogMatch(cleaned);
-      const name = match ? match.name : cleaned;
+      const { text, qty } = splitImportQty(cleaned, (t) => !!findCatalogMatch(t));
+      if (text.length < 2 || text.length > 40) continue;
+      const match = findCatalogMatch(text);
+      const name = match ? match.name : text;
       const key = name.toLowerCase();
       if (seen.has(key)) continue;
       if (alreadyInList(name)) continue;
       seen.add(key);
-      parsed.push({ name, category: match ? match.category : guessCategory(name), include: true });
+      parsed.push({ name, qty, category: match ? match.category : guessCategory(name), include: true });
     }
     setImportPreview(parsed);
   };
@@ -822,7 +860,7 @@ export default function ShoppingList() {
       setImportFileName("");
       return;
     }
-    const newItems = chosen.map((c) => makeItem(c.name, c.category, "1"));
+    const newItems = chosen.map((c) => makeItem(c.name, c.category, String(c.qty || 1)));
     persist([...newItems, ...items]);
     setShowImport(false);
     setImportPreview(null);
@@ -1322,7 +1360,7 @@ export default function ShoppingList() {
                       >
                         {p.include && <Check size={12} color="#243026" strokeWidth={3} />}
                       </button>
-                      <span style={{ ...styles.pickLabel, flex: 1, opacity: p.include ? 1 : 0.45 }}>{p.name}</span>
+                      <span style={{ ...styles.pickLabel, flex: 1, opacity: p.include ? 1 : 0.45 }}>{p.qty > 1 ? `${p.qty} × ` : ""}{p.name}</span>
                       <select value={p.category} onChange={(e) => setImportCategory(idx, e.target.value)} style={styles.importCatSelect}>
                         {CATEGORIES.map((c) => (<option key={c.id} value={c.id}>{c.label}</option>))}
                       </select>
