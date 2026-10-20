@@ -149,6 +149,7 @@ const SAVED_KEY = "family-shopping-list-saved-lists";
 const CUSTOM_KEY = "family-shopping-list-custom-products";
 export const NAME_KEY = "family-shopping-list-member-name";
 const NOTES_KEY = "family-shopping-list-note-overrides";
+const NAMES_KEY = "family-shopping-list-name-overrides";
 const CURRENT_KEY = "family-shopping-list-current-saved-id";
 
 // window.storage exists only inside Claude.ai. Anywhere else, fall back to this
@@ -317,14 +318,48 @@ function EditableNote({ note, onSave }) {
   );
 }
 
+// Product names the family renamed by tapping a name, keyed by the catalog's
+// original name. The last rename wins, like notes.
+let nameOverrides = {};
+const displayName = (name) =>
+  Object.prototype.hasOwnProperty.call(nameOverrides, name.trim()) ? nameOverrides[name.trim()] : name;
+
+function EditableName({ name, onSave }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  if (editing) {
+    return (
+      <input
+        autoFocus
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={() => { setEditing(false); if (draft.trim() && draft.trim() !== name) onSave(draft.trim()); }}
+        onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+        placeholder="שם המוצר"
+        style={{ ...styles.noteInput, fontSize: 16, fontWeight: 600 }}
+      />
+    );
+  }
+  return (
+    <span
+      role="button"
+      tabIndex={0}
+      onClick={() => { setDraft(name); setEditing(true); }}
+      style={{ ...styles.pickLabel, cursor: "pointer" }}
+    >
+      {name}
+    </span>
+  );
+}
+
 function getCatalogNote(itemName) {
   const trimmed = itemName.trim();
   if (Object.prototype.hasOwnProperty.call(noteOverrides, trimmed)) return noteOverrides[trimmed];
   for (const list of Object.values(COMMON_ITEMS)) {
-    const match = list.find((it) => it.name.trim() === trimmed);
+    const match = list.find((it) => displayName(it.name).trim() === trimmed);
     if (match && match.note) return match.note;
   }
-  const custom = customCatalog.find((p) => p.name.trim() === trimmed);
+  const custom = customCatalog.find((p) => displayName(p.name).trim() === trimmed);
   return custom && custom.note ? custom.note : "";
 }
 
@@ -368,6 +403,8 @@ export default function ShoppingList() {
   customCatalog = customProducts;
   const [noteMap, setNoteMap] = useState({});
   noteOverrides = noteMap;
+  const [nameMap, setNameMap] = useState({});
+  nameOverrides = nameMap;
 
   const setProductNote = async (name, text) => {
     const key = name.trim();
@@ -435,6 +472,12 @@ export default function ShoppingList() {
       if (res && res.value) setNoteMap(JSON.parse(res.value));
     } catch {
       // no edited notes yet
+    }
+    try {
+      const res = await window.storage.get(NAMES_KEY, true);
+      if (res && res.value) setNameMap(JSON.parse(res.value));
+    } catch {
+      // no renamed products yet
     }
   }, []);
 
@@ -591,10 +634,39 @@ export default function ShoppingList() {
   const finalItems = items.filter((it) => !it.done).slice().reverse();
 
   // Built-in catalog for a category plus the products the family added to it.
+  // origName stays the catalog's own name, so a renamed product can be renamed again.
   const catalogFor = (cat) => [
     ...(COMMON_ITEMS[cat] || []),
     ...customProducts.filter((p) => p.category === cat).map((p) => ({ ...p, custom: true })),
-  ];
+  ].map((p) => ({ ...p, origName: p.name, name: displayName(p.name) }));
+
+  // Renames a product everywhere: in the catalog, on the current list, and its note follows it.
+  const renameProduct = async (currentName, newName) => {
+    const from = currentName.trim();
+    const to = newName.trim();
+    if (!to || to === from) return;
+    const taken = CATEGORIES.some((c) => catalogFor(c.id).some((p) => p.name.trim() === to)) || alreadyInList(to);
+    if (taken) return;
+    let origName = null;
+    for (const c of CATEGORIES) {
+      const hit = catalogFor(c.id).find((p) => p.name.trim() === from);
+      if (hit) { origName = hit.origName.trim(); break; }
+    }
+    const note = getCatalogNote(from);
+    if (origName) {
+      const nextNames = { ...nameOverrides, [origName]: to };
+      setNameMap(nextNames);
+      try { await window.storage.set(NAMES_KEY, JSON.stringify(nextNames), true); } catch (e) { console.error("שגיאת שמירה", e); }
+    }
+    if (note) {
+      const nextNotes = { ...noteOverrides, [to]: note };
+      setNoteMap(nextNotes);
+      try { await window.storage.set(NOTES_KEY, JSON.stringify(nextNotes), true); } catch (e) { console.error("שגיאת שמירה", e); }
+    }
+    if (items.some((it) => it.name.trim() === from)) {
+      persist(items.map((it) => (it.name.trim() === from ? { ...it, name: to } : it)));
+    }
+  };
 
   const persistCustom = async (next) => {
     setCustomProducts(next);
@@ -1129,7 +1201,7 @@ export default function ShoppingList() {
               const qty = getListQty(item.name);
               const inList = qty > 0;
               return (
-                <div key={item.name} className="pick-row" style={styles.pickRow}>
+                <div key={item.origName} className="pick-row" style={styles.pickRow}>
                   <button
                     onClick={() => toggleCheck(item.name, activeTab)}
                     style={{ ...styles.pickCheck, borderColor: inList ? catInfo(activeTab).color : "#24302655", background: inList ? catInfo(activeTab).color : "transparent", cursor: "pointer" }}
@@ -1138,7 +1210,7 @@ export default function ShoppingList() {
                     {inList && <Check size={12} color="#243026" strokeWidth={3} />}
                   </button>
                   <span style={styles.pickTextWrap}>
-                    <span style={styles.pickLabel}>{item.name}</span>
+                    <EditableName name={item.name} onSave={(t) => renameProduct(item.name, t)} />
                     <EditableNote note={getCatalogNote(item.name)} onSave={(t) => setProductNote(item.name, t)} />
                   </span>
                   {item.custom && (
@@ -1268,7 +1340,7 @@ export default function ShoppingList() {
                     <Check size={12} color="#243026" strokeWidth={3} />
                   </button>
                   <span style={styles.pickTextWrap}>
-                    <span style={styles.pickLabel}>{it.name}</span>
+                    <EditableName name={it.name} onSave={(t) => renameProduct(it.name, t)} />
                     <EditableNote note={note} onSave={(t) => setProductNote(it.name, t)} />
                   </span>
                   <QtyStepper
