@@ -297,9 +297,11 @@ function WithUnitsLabel({ show, children }) {
 
 // One line of the list as it is sent and saved: "2 × שם (הערה)", or with a weight
 // "2 קילו שם (הערה)" (and "3 × 2 קילו שם" when both are set).
-function formatListLine({ qty, kg, name, note }) {
+// The email leaves out the "×" ("2 שם"), as the family asked (plain = true).
+function formatListLine({ qty, kg, name, note }, plain = false) {
+  const times = plain ? " " : " × ";
   const weight = kg > 0 ? `${kg} קילו ` : "";
-  const count = kg > 0 ? (qty > 1 ? `${qty} × ` : "") : `${qty} × `;
+  const count = kg > 0 ? (qty > 1 ? `${qty}${times}` : "") : `${qty}${times}`;
   return `${count}${weight}${name}${note ? ` (${note})` : ""}`;
 }
 
@@ -880,9 +882,14 @@ export default function ShoppingList() {
       const q = parseInt(it.qty, 10);
       const qty = Number.isFinite(q) && q > 0 ? q : 1;
       const note = getCatalogNote(it.name);
-      return formatListLine({ qty, kg: it.kg || 0, name: it.name, note });
+      return formatListLine({ qty, kg: it.kg || 0, name: it.name, note }, true);
     });
-    return ["גיל דריימן", "המגדל 11 כרכור", "052-4350444", "", "", ...lines].join("\n");
+    // Plain-text mail has no alignment setting; a right-to-left mark at the start
+    // of each line makes mail apps lay the Hebrew lines out from the right.
+    const RLM = "\u200f";
+    return ["גיל דריימן", "המגדל 11 כרכור", "052-4350444", "", "", ...lines]
+      .map((line) => (line ? RLM + line : line))
+      .join("\n");
   };
 
   const emailSubject = "גיל דריימן - 052-4350444";
