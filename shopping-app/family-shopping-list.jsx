@@ -284,6 +284,17 @@ function KgStepper({ kg, disabled, onSet }) {
   );
 }
 
+// In meat and fish the count stepper gets a caption too, so it reads apart from the kilos.
+function WithUnitsLabel({ show, children }) {
+  if (!show) return children;
+  return (
+    <div style={styles.kgWrap}>
+      {children}
+      <span style={styles.kgLabel}>יחידות</span>
+    </div>
+  );
+}
+
 // One line of the list as it is sent and saved: "2 × שם (הערה)", or with a weight
 // "2 קילו שם (הערה)" (and "3 × 2 קילו שם" when both are set).
 function formatListLine({ qty, kg, name, note }) {
@@ -1238,13 +1249,15 @@ export default function ShoppingList() {
                   onSet={(n) => customPick.trim() && setListKg(customPick.trim(), activeTab, n)}
                 />
               )}
-              <QtyStepper
-                qty={customQty}
-                disabled={!customPick.trim()}
-                onInc={incrementCustom}
-                onDec={decrementCustom}
-                onSet={(n) => customPick.trim() && setListQty(customPick.trim(), activeTab, n)}
-              />
+              <WithUnitsLabel show={activeTab === KG_CATEGORY}>
+                <QtyStepper
+                  qty={customQty}
+                  disabled={!customPick.trim()}
+                  onInc={incrementCustom}
+                  onDec={decrementCustom}
+                  onSet={(n) => customPick.trim() && setListQty(customPick.trim(), activeTab, n)}
+                />
+              </WithUnitsLabel>
             </div>
 
             {catalogFor(activeTab).length === 0 && (
@@ -1278,12 +1291,14 @@ export default function ShoppingList() {
                   {activeTab === KG_CATEGORY && (
                     <KgStepper kg={getListKg(item.name)} onSet={(n) => setListKg(item.name, activeTab, n)} />
                   )}
-                  <QtyStepper
-                    qty={qty}
-                    onInc={() => incrementListItem(item.name, activeTab)}
-                    onDec={() => decrementListItem(item.name)}
-                    onSet={(n) => setListQty(item.name, activeTab, n)}
-                  />
+                  <WithUnitsLabel show={activeTab === KG_CATEGORY}>
+                    <QtyStepper
+                      qty={qty}
+                      onInc={() => incrementListItem(item.name, activeTab)}
+                      onDec={() => decrementListItem(item.name)}
+                      onSet={(n) => setListQty(item.name, activeTab, n)}
+                    />
+                  </WithUnitsLabel>
                 </div>
               );
             })}
@@ -1402,12 +1417,14 @@ export default function ShoppingList() {
                   {it.category === KG_CATEGORY && (
                     <KgStepper kg={it.kg || 0} onSet={(n) => setListKg(it.name, it.category, n)} />
                   )}
-                  <QtyStepper
-                    qty={qty}
-                    onInc={() => incrementListItem(it.name, it.category)}
-                    onDec={() => decrementListItem(it.name)}
-                    onSet={(n) => setListQty(it.name, it.category, n)}
-                  />
+                  <WithUnitsLabel show={it.category === KG_CATEGORY}>
+                    <QtyStepper
+                      qty={qty}
+                      onInc={() => incrementListItem(it.name, it.category)}
+                      onDec={() => decrementListItem(it.name)}
+                      onSet={(n) => setListQty(it.name, it.category, n)}
+                    />
+                  </WithUnitsLabel>
                 </div>
               );
             })}
