@@ -894,7 +894,7 @@ export default function ShoppingList() {
   };
 
   const emailSubject = "גיל דריימן - 052-4350444";
-  const mailtoHref = `mailto:Karkur@politzer.vo.il?subject=${encodeURIComponent(emailSubject)}&body=${encodeURIComponent(buildEmailBody())}`;
+  const mailtoHref = `mailto:karkur@politzer.co.il?subject=${encodeURIComponent(emailSubject)}&body=${encodeURIComponent(buildEmailBody())}`;
   const whatsappHref = `https://wa.me/?text=${encodeURIComponent(buildEmailBody())}`;
 
   // Opens the phone's mail app with recipient, subject and body filled in (nothing is sent automatically).
