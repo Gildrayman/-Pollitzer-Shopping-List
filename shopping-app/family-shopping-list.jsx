@@ -177,7 +177,7 @@ export function greetingForHour(h) {
 }
 
 // Quantity control: "+" / "−" buttons, plus a number the user can type directly (0–20).
-function QtyStepper({ qty, disabled, onInc, onDec, onSet }) {
+function QtyStepper({ qty, disabled, onInc, onDec, onSet, max = 20, label = "כמות" }) {
   const [draft, setDraft] = useState(null);
   const shown = draft !== null ? draft : String(qty);
 
@@ -186,16 +186,16 @@ function QtyStepper({ qty, disabled, onInc, onDec, onSet }) {
     const n = parseInt(draft, 10);
     setDraft(null);
     if (!Number.isFinite(n)) return;
-    onSet(Math.min(20, Math.max(0, n)));
+    onSet(Math.min(max, Math.max(0, n)));
   };
 
   return (
     <div style={styles.stepper}>
       <button
         onClick={onInc}
-        disabled={disabled || qty >= 20}
-        style={{ ...styles.stepperBtn, opacity: disabled || qty >= 20 ? 0.35 : 1 }}
-        aria-label="הגדל כמות"
+        disabled={disabled || qty >= max}
+        style={{ ...styles.stepperBtn, opacity: disabled || qty >= max ? 0.35 : 1 }}
+        aria-label={`הגדל ${label}`}
       >
         +
       </button>
@@ -210,13 +210,13 @@ function QtyStepper({ qty, disabled, onInc, onDec, onSet }) {
         onBlur={commit}
         onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
         style={styles.stepperInput}
-        aria-label="כמות"
+        aria-label={label}
       />
       <button
         onClick={onDec}
         disabled={disabled || qty <= 0}
         style={{ ...styles.stepperBtn, opacity: disabled || qty <= 0 ? 0.35 : 1 }}
-        aria-label="הקטן כמות"
+        aria-label={`הקטן ${label}`}
       >
         −
       </button>
@@ -261,6 +261,35 @@ function splitImportQty(line, isKnown) {
     }
   }
   return { text, qty };
+}
+
+// Meat and fish can also be ordered by weight: a kilo stepper beside the count.
+const KG_CATEGORY = "meat";
+const MAX_KG = 10;
+
+function KgStepper({ kg, disabled, onSet }) {
+  return (
+    <div style={styles.kgWrap}>
+      <QtyStepper
+        qty={kg}
+        max={MAX_KG}
+        label="קילו"
+        disabled={disabled}
+        onInc={() => onSet(Math.min(MAX_KG, kg + 1))}
+        onDec={() => onSet(Math.max(0, kg - 1))}
+        onSet={onSet}
+      />
+      <span style={styles.kgLabel}>קילו</span>
+    </div>
+  );
+}
+
+// One line of the list as it is sent and saved: "2 × שם (הערה)", or with a weight
+// "2 קילו שם (הערה)" (and "3 × 2 קילו שם" when both are set).
+function formatListLine({ qty, kg, name, note }) {
+  const weight = kg > 0 ? `${kg} קילו ` : "";
+  const count = kg > 0 ? (qty > 1 ? `${qty} × ` : "") : `${qty} × `;
+  return `${count}${weight}${name}${note ? ` (${note})` : ""}`;
 }
 
 function stripWhatsAppPrefix(line) {
@@ -513,7 +542,7 @@ export default function ShoppingList() {
         const q = parseInt(it.qty, 10);
         const qty = Number.isFinite(q) && q > 0 ? q : 1;
         const note = getCatalogNote(it.name);
-        return `${qty} × ${it.name}${note ? ` (${note})` : ""}`;
+        return formatListLine({ qty, kg: it.kg || 0, name: it.name, note });
       });
     const text = lines.join("\n");
     setSummaryText(text);
@@ -574,6 +603,22 @@ export default function ShoppingList() {
       return;
     }
     persist(items.map((it) => (it.id === existing.id ? { ...it, qty: String(qty) } : it)));
+  };
+
+  const getListKg = (itemName) => {
+    const existing = items.find((it) => it.name.trim() === itemName.trim() && !it.done);
+    return existing && existing.kg > 0 ? existing.kg : 0;
+  };
+
+  // Setting a weight on a product that isn't on the list yet adds it (count 1).
+  const setListKg = (itemName, cat, n) => {
+    const kg = Math.min(MAX_KG, Math.max(0, n));
+    const existing = items.find((it) => it.name.trim() === itemName.trim() && !it.done);
+    if (!existing) {
+      if (kg > 0) persist([{ ...makeItem(itemName, cat, "1"), kg }, ...items]);
+      return;
+    }
+    persist(items.map((it) => (it.id === existing.id ? { ...it, kg } : it)));
   };
 
   const toggleCheck = (itemName, cat) => {
@@ -730,6 +775,7 @@ export default function ShoppingList() {
         name: it.name,
         category: it.category,
         qty: Number.isFinite(q) && q > 0 ? q : 1,
+        kg: it.kg || 0,
         note: getCatalogNote(it.name),
       };
     });
@@ -762,12 +808,12 @@ export default function ShoppingList() {
 
   // --- Offer to save before leaving / closing the app ---
   const [showLeavePrompt, setShowLeavePrompt] = useState(false);
-  const listSig = (arr) => arr.map((x) => `${x.name.trim()}|${x.qty}`).join(";");
+  const listSig = (arr) => arr.map((x) => `${x.name.trim()}|${x.qty}|${x.kg || 0}`).join(";");
   const savedForCurrent = currentListId ? savedLists.find((l) => l.id === currentListId) : null;
   const currentSig = listSig(
     finalItems.map((it) => {
       const q = parseInt(it.qty, 10);
-      return { name: it.name, qty: Number.isFinite(q) && q > 0 ? q : 1 };
+      return { name: it.name, qty: Number.isFinite(q) && q > 0 ? q : 1, kg: it.kg || 0 };
     })
   );
   const hasUnsaved =
@@ -806,7 +852,7 @@ export default function ShoppingList() {
   const loadSaved = (list) => {
     const toAdd = list.items
       .filter((s) => !items.some((it) => it.name.trim() === s.name.trim() && !it.done))
-      .map((s) => makeItem(s.name, s.category, String(s.qty)));
+      .map((s) => ({ ...makeItem(s.name, s.category, String(s.qty)), ...(s.kg ? { kg: s.kg } : {}) }));
     if (toAdd.length) persist([...toAdd.reverse(), ...items]);
     setShowSaved(false);
     setShowFinal(true);
@@ -823,7 +869,7 @@ export default function ShoppingList() {
       const q = parseInt(it.qty, 10);
       const qty = Number.isFinite(q) && q > 0 ? q : 1;
       const note = getCatalogNote(it.name);
-      return `${qty} × ${it.name}${note ? ` (${note})` : ""}`;
+      return formatListLine({ qty, kg: it.kg || 0, name: it.name, note });
     });
     return ["גיל דריימן", "המגדל 11 כרכור", "052-4350444", "", "", ...lines].join("\n");
   };
@@ -1017,7 +1063,7 @@ export default function ShoppingList() {
                     <div style={styles.savedBody}>
                       {l.items.map((s, i) => (
                         <div key={i} style={styles.savedLine}>
-                          {s.qty} × {s.name}{s.note ? ` (${s.note})` : ""}
+                          {formatListLine({ qty: s.qty, kg: s.kg || 0, name: s.name, note: s.note })}
                         </div>
                       ))}
                       <div style={styles.savedActions}>
@@ -1185,6 +1231,13 @@ export default function ShoppingList() {
                 placeholder="הוסף ידנית..."
                 style={styles.customPickInput}
               />
+              {activeTab === KG_CATEGORY && (
+                <KgStepper
+                  kg={customPick.trim() ? getListKg(customPick.trim()) : 0}
+                  disabled={!customPick.trim()}
+                  onSet={(n) => customPick.trim() && setListKg(customPick.trim(), activeTab, n)}
+                />
+              )}
               <QtyStepper
                 qty={customQty}
                 disabled={!customPick.trim()}
@@ -1221,6 +1274,9 @@ export default function ShoppingList() {
                     >
                       <X size={14} />
                     </button>
+                  )}
+                  {activeTab === KG_CATEGORY && (
+                    <KgStepper kg={getListKg(item.name)} onSet={(n) => setListKg(item.name, activeTab, n)} />
                   )}
                   <QtyStepper
                     qty={qty}
@@ -1343,6 +1399,9 @@ export default function ShoppingList() {
                     <EditableName name={it.name} onSave={(t) => renameProduct(it.name, t)} />
                     <EditableNote note={note} onSave={(t) => setProductNote(it.name, t)} />
                   </span>
+                  {it.category === KG_CATEGORY && (
+                    <KgStepper kg={it.kg || 0} onSet={(n) => setListKg(it.name, it.category, n)} />
+                  )}
                   <QtyStepper
                     qty={qty}
                     onInc={() => incrementListItem(it.name, it.category)}
@@ -1539,6 +1598,8 @@ const styles = {
   noteInput: { width: "100%", marginTop: 2, padding: "4px 6px", borderRadius: 6, border: "1px solid #3E7C59", background: "#FFFFFF", color: "#243026", fontFamily: "'Heebo', sans-serif", fontSize: "16px", boxSizing: "border-box" },
   qtyTagUnused: {},
   pickHint: { marginInlineStart: "auto", color: "#7C8574", fontSize: "0.72rem" },
+  kgWrap: { display: "flex", flexDirection: "column", alignItems: "center", gap: 1, flex: "0 0 auto" },
+  kgLabel: { fontSize: "0.68rem", color: "#7C8574", lineHeight: 1 },
   stepper: { display: "flex", alignItems: "center", gap: 0, flex: "0 0 auto", background: "#FFFFFF", border: "1px solid #24302633", borderRadius: 8, overflow: "hidden" },
   stepperBtn: { width: 26, height: 26, display: "flex", alignItems: "center", justifyContent: "center", background: "transparent", border: "none", color: "#243026", fontSize: "1rem", fontWeight: 600, cursor: "pointer", lineHeight: 1 },
   stepperInput: { width: 34, height: 26, textAlign: "center", border: "none", background: "transparent", color: "#243026", fontFamily: "'Heebo', sans-serif", fontSize: 16, fontWeight: 600, padding: 0, outline: "none" },
