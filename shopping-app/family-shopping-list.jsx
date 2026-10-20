@@ -223,24 +223,26 @@ function QtyStepper({ qty, disabled, onInc, onDec, onSet }) {
   );
 }
 
-// Splits a pasted line into the product and its quantity, so "3 עגבניות",
+// Splits a pasted line into the product and its quantity, so "3 עגבניות", "3. עגבניות",
 // "2 × חלב", "חלב x2" or "בננות - 4" become a name plus a number. A bare number
 // at the end ("דנונה פרו 20") counts only when the rest is a known product, since
 // many product names end in a number. The app's own list ("1 × name (note)")
 // pastes back too: a trailing "(note)" is dropped when the name without it is known.
 function splitImportQty(line, isKnown) {
-  let text = line.trim();
+  // Copied text often carries invisible direction marks and non-breaking spaces.
+  let text = line.replace(/[\u200e\u200f\u202a-\u202e\u2066-\u2069\ufeff]/g, "").replace(/\u00a0/g, " ").trim();
   let qty = 1;
   const clamp = (n) => Math.min(20, Math.max(1, n));
-  const lead = text.match(/^(\d{1,2})\s*(?:[x×X*]|יח['׳]?|יחידות)?\s+(.+)$/);
+  const lead = text.match(/^(\d{1,2})\s*(?:[x×X*.):\-–]|יח['׳]?|יחידות)?\s*(\D.*)$/);
   const marked = text.match(/^(.+?)\s*(?:[-–:]\s*|[x×X*]\s*|\(\s*)(\d{1,2})\s*(?:יח['׳]?|יחידות)?\s*\)?$/);
   const unit = text.match(/^(.+?)\s+(\d{1,2})\s*(?:יח['׳]?|יחידות)$/);
   const bare = text.match(/^(.+?)\s+(\d{1,2})$/);
-  if (isKnown(text)) {
-    // The whole line is a product name as it stands.
-  } else if (lead) {
+  if (lead) {
+    // A number before the name is always the quantity.
     qty = clamp(parseInt(lead[1], 10));
     text = lead[2].trim();
+  } else if (isKnown(text)) {
+    // The whole line is a product name as it stands.
   } else if (marked) {
     qty = clamp(parseInt(marked[2], 10));
     text = marked[1].trim();
@@ -829,8 +831,8 @@ export default function ShoppingList() {
     const seen = new Set();
     const parsed = [];
     for (const raw of lines) {
-      // Pasted lists often start lines with a bullet or a number ("- ", "• ", "3. ").
-      const cleaned = stripWhatsAppPrefix(raw).replace(/^([-–•*·]|\d{1,2}[.)])\s*/, "").trim();
+      // Pasted lists often start lines with a bullet ("- ", "• "). A number there is a quantity.
+      const cleaned = stripWhatsAppPrefix(raw).replace(/^[\u200e\u200f\s]*[-–•*·]\s*/, "").trim();
       if (!cleaned) continue;
       if (/^(https?:\/\/|<|תמונה|image omitted|video omitted|✏)/i.test(cleaned)) continue;
       const { text, qty } = splitImportQty(cleaned, (t) => !!findCatalogMatch(t));
