@@ -776,20 +776,34 @@ export default function ShoppingList() {
     reader.readAsText(file, "utf-8");
   };
 
+  // An imported line that names a catalog product takes the catalog's exact name,
+  // so it shows as picked in its category, the same as tapping it in the app.
+  const findCatalogMatch = (name) => {
+    const key = name.trim().toLowerCase();
+    for (const c of CATEGORIES) {
+      const hit = catalogFor(c.id).find((p) => p.name.trim().toLowerCase() === key);
+      if (hit) return { name: hit.name, category: c.id };
+    }
+    return null;
+  };
+
   const runImportPreview = () => {
     const lines = importText.split("\n");
     const seen = new Set();
     const parsed = [];
     for (const raw of lines) {
-      const cleaned = stripWhatsAppPrefix(raw);
+      // Pasted lists often start lines with a bullet or a number ("- ", "• ", "3. ").
+      const cleaned = stripWhatsAppPrefix(raw).replace(/^([-–•*·]|\d{1,2}[.)])\s*/, "").trim();
       if (!cleaned) continue;
       if (cleaned.length < 2 || cleaned.length > 40) continue;
       if (/^(https?:\/\/|<|תמונה|image omitted|video omitted|✏)/i.test(cleaned)) continue;
-      const key = cleaned.toLowerCase();
+      const match = findCatalogMatch(cleaned);
+      const name = match ? match.name : cleaned;
+      const key = name.toLowerCase();
       if (seen.has(key)) continue;
-      if (alreadyInList(cleaned)) continue;
+      if (alreadyInList(name)) continue;
       seen.add(key);
-      parsed.push({ name: cleaned, category: guessCategory(cleaned), include: true });
+      parsed.push({ name, category: match ? match.category : guessCategory(name), include: true });
     }
     setImportPreview(parsed);
   };
@@ -808,7 +822,7 @@ export default function ShoppingList() {
       setImportFileName("");
       return;
     }
-    const newItems = chosen.map((c) => makeItem(c.name, c.category));
+    const newItems = chosen.map((c) => makeItem(c.name, c.category, "1"));
     persist([...newItems, ...items]);
     setShowImport(false);
     setImportPreview(null);
@@ -994,7 +1008,7 @@ export default function ShoppingList() {
             </button>
             <button onClick={() => setShowImport(true)} className="chalk-btn" style={styles.listActionBtn}>
               <Upload size={12} style={{ marginInlineEnd: 3, verticalAlign: "-2px" }} />
-              ייבוא מקובץ
+              ייבוא
             </button>
           </div>
 
@@ -1258,14 +1272,14 @@ export default function ShoppingList() {
         <div style={styles.overlay} onClick={() => { setShowImport(false); setImportPreview(null); }}>
           <div className="sheet" style={styles.sheet} onClick={(e) => e.stopPropagation()}>
             <div style={styles.sheetHeader}>
-              <h3 style={styles.sheetTitle}>ייבוא מקובץ</h3>
+              <h3 style={styles.sheetTitle}>ייבוא מקובץ או מטקסט</h3>
               <button onClick={() => { setShowImport(false); setImportPreview(null); }} style={styles.sheetClose}><X size={18} /></button>
             </div>
 
             {!importPreview ? (
               <>
                 <p style={styles.importHelp}>
-                  בחרו קובץ טקסט (למשל ייצוא צ'אט מוואטסאפ, או כל קובץ txt עם רשימת מוצרים) — כל שורה בקובץ תהפוך לפריט אפשרי.
+                  בחרו קובץ טקסט (למשל ייצוא צ'אט מוואטסאפ), או הדביקו רשימה בתיבה למטה. כל שורה תהפוך לפריט אפשרי.
                 </p>
                 <label style={styles.fileDropZone}>
                   <input type="file" accept=".txt,text/plain" onChange={handleFileSelect} style={{ display: "none" }} />
@@ -1274,13 +1288,22 @@ export default function ShoppingList() {
                     {importFileName ? importFileName : "לחצו לבחירת קובץ..."}
                   </span>
                 </label>
+                <label htmlFor="import-paste" style={{ ...styles.importHelp, display: "block", marginBottom: 6 }}>או הדביקו כאן טקסט, מוצר בכל שורה:</label>
+                <textarea
+                  id="import-paste"
+                  value={importText}
+                  onChange={(e) => { setImportText(e.target.value); setImportFileName(""); }}
+                  placeholder={"עגבניות שרי\nחלב תנובה\nבננות"}
+                  rows={6}
+                  style={styles.importPaste}
+                />
                 <button onClick={runImportPreview} className="chalk-btn" style={styles.confirmBtn} disabled={!importText.trim()}>
-                  נתח קובץ
+                  הצג מוצרים לייבוא
                 </button>
               </>
             ) : importPreview.length === 0 ? (
               <>
-                <p style={styles.importHelp}>לא זוהו פריטים חדשים בקובץ שנבחר.</p>
+                <p style={styles.importHelp}>לא זוהו מוצרים חדשים. ייתכן שכולם כבר ברשימה.</p>
                 <button onClick={() => { setImportPreview(null); setImportText(""); setImportFileName(""); }} className="chalk-btn" style={styles.confirmBtn}>נסה שוב</button>
               </>
             ) : (
@@ -1410,6 +1433,7 @@ const styles = {
   stepperQty: { width: 22, textAlign: "center", color: "#243026", fontSize: "0.85rem", fontWeight: 600 },
   confirmBtn: { marginTop: 14, padding: "12px", borderRadius: 10, border: "none", background: "#3E7C59", color: "#FFFFFF", fontFamily: "'Heebo', sans-serif", fontWeight: 600, fontSize: "0.92rem", cursor: "pointer" },
   importHelp: { color: "#4B5347", fontSize: "0.83rem", lineHeight: 1.6, marginBottom: 12 },
+  importPaste: { width: "100%", boxSizing: "border-box", padding: "10px 12px", borderRadius: 10, border: "1px solid #24302633", background: "#FFFFFF", color: "#243026", fontFamily: "'Heebo', sans-serif", fontSize: 16, lineHeight: 1.6, resize: "vertical", marginBottom: 14 },
   fileDropZone: { display: "flex", alignItems: "center", gap: 10, padding: "16px 14px", borderRadius: 10, border: "1.5px dashed #24302644", background: "#FFFFFF", cursor: "pointer", marginBottom: 14 },
   fileDropText: { color: "#4B5347", fontSize: "0.88rem" },
   importRow: { display: "flex", alignItems: "center", gap: 10, padding: "8px 6px", borderBottom: "1px solid #24302614" },
