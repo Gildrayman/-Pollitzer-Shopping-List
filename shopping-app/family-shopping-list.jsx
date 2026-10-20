@@ -298,6 +298,7 @@ export default function ShoppingList() {
 
   const [activeTab, setActiveTab] = useState("produce");
   const [customPick, setCustomPick] = useState("");
+  const [customPickNote, setCustomPickNote] = useState("");
 
   const [showFinal, setShowFinal] = useState(false);
   const [finalCustomText, setFinalCustomText] = useState("");
@@ -509,6 +510,7 @@ export default function ShoppingList() {
     const text = customPick.trim();
     if (!text) return;
     incrementListItem(text, activeTab);
+    saveManualToCatalog(text, customPickNote.trim(), activeTab);
   };
 
   const decrementCustom = () => {
@@ -523,7 +525,9 @@ export default function ShoppingList() {
     if (getListQty(text) === 0) {
       incrementListItem(text, activeTab);
     }
+    saveManualToCatalog(text, customPickNote.trim(), activeTab);
     setCustomPick("");
+    setCustomPickNote("");
   };
 
   const finalCustomQty = finalCustomText.trim() ? getListQty(finalCustomText.trim()) : 0;
@@ -587,6 +591,27 @@ export default function ShoppingList() {
     setNewProdNote("");
     setNewProdMsg("");
     setActiveTab(newProdCat);
+  };
+
+  // A product typed in by hand also joins the category's permanent list, so it
+  // can be picked next time. If it's already there, only a missing note is filled in.
+  const saveManualToCatalog = (name, note, category) => {
+    const key = name.toLowerCase();
+    const own = customProducts.find((p) => p.name.trim().toLowerCase() === key);
+    if (own) {
+      if (note && !own.note) {
+        persistCustom(customProducts.map((p) => (p.id === own.id ? { ...p, note } : p)));
+      }
+      return;
+    }
+    const builtIn = CATEGORIES.some((c) =>
+      (COMMON_ITEMS[c.id] || []).some((p) => p.name.trim().toLowerCase() === key)
+    );
+    if (builtIn) return;
+    persistCustom([
+      ...customProducts,
+      { id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, name, note, category },
+    ]);
   };
 
   const removeCustomProduct = (id) => persistCustom(customProducts.filter((p) => p.id !== id));
@@ -1067,6 +1092,20 @@ export default function ShoppingList() {
                 onSet={(n) => customPick.trim() && setListQty(customPick.trim(), activeTab, n)}
               />
             </div>
+            {customPick.trim() && (
+              <div className="pick-row" style={styles.pickRow}>
+                <input
+                  value={customPickNote}
+                  onChange={(e) => setCustomPickNote(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && addCustomAndReset()}
+                  placeholder="הערה למוצר (לא חובה)"
+                  style={styles.customPickInput}
+                />
+              </div>
+            )}
+            {customPick.trim() && (
+              <p style={{ ...styles.pickHint, padding: "0 8px 8px" }}>המוצר יישמר גם ברשימה הקבועה של הקטגוריה.</p>
+            )}
 
             {catalogFor(activeTab).length === 0 && (
               <p style={{ ...styles.pickHint, padding: "14px 8px" }}>אין עדיין פריטים קבועים בקטגוריה הזו — אפשר להוסיף מוצר אחר למעלה.</p>
