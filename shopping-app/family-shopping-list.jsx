@@ -419,6 +419,7 @@ export default function ShoppingList() {
   const [finalCustomText, setFinalCustomText] = useState("");
   const [mailFailed, setMailFailed] = useState(false);
   const [copyMsg, setCopyMsg] = useState("");
+  const [mailCopied, setMailCopied] = useState(false);
 
   // Greeting: follows the phone's clock; the name is saved on each device separately.
   const [hour, setHour] = useState(new Date().getHours());
@@ -898,8 +899,42 @@ export default function ShoppingList() {
 
   // Opens the phone's mail app with recipient, subject and body filled in (nothing is sent automatically).
   // If the page didn't lose focus within ~1.5s the browser blocked it, so we show a copy fallback.
+  // Copies the list as formatted right-to-left text (with a plain-text copy as well).
+  // Mail apps keep that alignment when it is pasted, even ones that show the
+  // mailto body on the left.
+  const copyRich = (text) => {
+    const box = document.createElement("div");
+    box.setAttribute("dir", "rtl");
+    box.contentEditable = "true";
+    box.style.cssText = "position:fixed;top:0;left:-9999px;white-space:pre-wrap;direction:rtl;text-align:right;";
+    text.replace(/\u200f/g, "").split("\n").forEach((line) => {
+      const row = document.createElement("div");
+      row.setAttribute("dir", "rtl");
+      row.style.cssText = "direction:rtl;text-align:right;";
+      if (line) row.textContent = line;
+      else row.appendChild(document.createElement("br"));
+      box.appendChild(row);
+    });
+    document.body.appendChild(box);
+    let ok = false;
+    try {
+      const range = document.createRange();
+      range.selectNodeContents(box);
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+      ok = document.execCommand("copy");
+      sel.removeAllRanges();
+    } catch (e) {
+      ok = false;
+    }
+    document.body.removeChild(box);
+    return ok;
+  };
+
   const openMail = () => {
     setMailFailed(false);
+    setMailCopied(copyRich(buildEmailBody()));
     let left = false;
     const onLeave = () => { left = true; };
     window.addEventListener("blur", onLeave);
@@ -922,8 +957,8 @@ export default function ShoppingList() {
 
   const copyMailText = async () => {
     const text = buildEmailBody();
-    let ok = false;
-    try {
+    let ok = copyRich(text);
+    if (!ok) try {
       await navigator.clipboard.writeText(text);
       ok = true;
     } catch (e) {
@@ -1362,6 +1397,14 @@ export default function ShoppingList() {
               שלח במייל
             </button>
           </div>
+
+          {mailCopied && !mailFailed && (
+            <div style={styles.mailFailCard}>
+              <p style={styles.mailFailText}>
+                הרשימה גם הועתקה, מיושרת לימין. אם במייל היא מופיעה משמאל: מוחקים את הטקסט שבגוף המייל ומדביקים במקומו.
+              </p>
+            </div>
+          )}
 
           {mailFailed && (
             <div style={styles.mailFailCard}>
