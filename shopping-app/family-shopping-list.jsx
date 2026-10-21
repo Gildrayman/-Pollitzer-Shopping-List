@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { Plus, Check, ShoppingBasket, X, Users, Upload, FileText, Eye, ArrowRight, Send, MessageCircle, Save, History, Trash2, Mic } from "lucide-react";
+import { isFamilyPassword } from "./auth.js";
 import { speakHe, stopSpeaking, primeSpeech, onSpeechStatus, micTone, MIC_HELP } from "./speech.js";
 import { parseCommand, findProduct, findCategory, applyOp, speakItem, prettyHe, normHe, VOICE_HELP } from "./voice.js";
 
@@ -422,6 +423,11 @@ export default function ShoppingList() {
   const [showFinal, setShowFinal] = useState(false);
   const [finalCustomText, setFinalCustomText] = useState("");
   const [mailFailed, setMailFailed] = useState(false);
+  // Sending mail asks first for a confirmation, then for the family password.
+  const [mailStep, setMailStep] = useState(null); // "confirm" | "password"
+  const [mailPw, setMailPw] = useState("");
+  const [mailPwError, setMailPwError] = useState("");
+  const mailStepSpokenRef = useRef(false);
   const [copyMsg, setCopyMsg] = useState("");
   const [mailCopied, setMailCopied] = useState(false);
 
@@ -983,6 +989,30 @@ export default function ShoppingList() {
     }, 1500);
   };
 
+  const askSendMail = () => {
+    setMailPw("");
+    setMailPwError("");
+    setMailStep("confirm");
+  };
+
+  const closeMailStep = () => {
+    setMailStep(null);
+    setMailPw("");
+    setMailPwError("");
+  };
+
+  // The tap on "שלח" counts as the user's own tap, so the phone lets the mail app open.
+  const submitMailPassword = (e) => {
+    if (e) e.preventDefault();
+    if (!isFamilyPassword(mailPw)) {
+      setMailPw("");
+      setMailPwError("הסיסמה שגויה. נסו שוב.");
+      return;
+    }
+    closeMailStep();
+    openMail();
+  };
+
   const copyMailText = async () => {
     const text = buildEmailBody();
     let ok = copyRich(text);
@@ -1076,7 +1106,7 @@ export default function ShoppingList() {
   const [voiceState, setVoiceState] = useState("idle"); // idle | listening | speaking
   const [voiceHeard, setVoiceHeard] = useState("");
   const [voiceSaid, setVoiceSaid] = useState("");
-  const [sendPrompt, setSendPrompt] = useState(null); // "mail" | "whatsapp": waits for one tap
+  const [sendPrompt, setSendPrompt] = useState(null); // "whatsapp": waits for one tap
   const [voiceError, setVoiceError] = useState("");
   const [flashName, setFlashName] = useState("");
   const [recInfo, setRecInfo] = useState("");
@@ -1447,8 +1477,19 @@ export default function ShoppingList() {
           if (pending.action === "new_list") {
             startNewList();
             reply(`${heard} פתחתי רשימה חדשה וריקה. הרשימה הקודמת נשמרה ברשימות הקודמות.`);
+          } else if (pending.action === "send_mail") {
+            // Saying yes is the confirmation; the password is typed on screen.
+            setShowSaved(false);
+            setShowFinal(true);
+            setMailPw("");
+            setMailPwError("");
+            mailStepSpokenRef.current = true;
+            setMailStep("password");
+            reply(`${heard} כדי לשלוח, הקלידו את סיסמת השליחה ולחצו על הכפתור שלח.`, { keepListening: false });
+            voiceOnRef.current = false;
+            setVoiceOn(false);
           } else {
-            startSendPrompt(pending.action === "send_mail" ? "mail" : "whatsapp", heard);
+            startSendPrompt("whatsapp", heard);
           }
           return;
         }
@@ -1599,6 +1640,12 @@ export default function ShoppingList() {
     speakHe(text);
   };
   useEffect(() => { sayShown(saveMsg); }, [saveMsg]);
+  useEffect(() => {
+    if (mailStepSpokenRef.current) { mailStepSpokenRef.current = false; return; }
+    if (mailStep === "confirm") sayShown("לשלוח את הרשימה במייל למכולת? יש כפתור כן, להמשיך, וכפתור ביטול.");
+    else if (mailStep === "password") sayShown("הקלידו את סיסמת השליחה ולחצו על הכפתור שלח.");
+  }, [mailStep]);
+  useEffect(() => { sayShown(mailPwError); }, [mailPwError]);
   useEffect(() => { sayShown(copyMsg); }, [copyMsg]);
   useEffect(() => { sayShown(newProdMsg); }, [newProdMsg]);
   useEffect(() => {
@@ -1970,7 +2017,7 @@ export default function ShoppingList() {
               שתף בווצאפ
             </a>
             <button
-              onClick={openMail}
+              onClick={askSendMail}
               className="chalk-btn final-top-btn"
               style={{ ...styles.finalTopBtn, ...styles.finalSendBtn }}
             >
@@ -2157,33 +2204,71 @@ export default function ShoppingList() {
         </div>
       )}
 
-      {sendPrompt && (
-        sendPrompt === "mail" ? (
-          <button
-            onClick={() => { setSendPrompt(null); openMail(); }}
-            style={styles.tapAnywhere}
-            aria-label="הקישו כדי לפתוח את המייל עם הרשימה"
-            autoFocus
-          >
-            <Send size={56} />
-            <span style={styles.tapAnywhereText}>הקישו בכל מקום כדי לפתוח את המייל</span>
-            <span style={styles.tapAnywhereSub}>אחר כך לוחצים שליחה ב-Gmail</span>
-          </button>
-        ) : (
-          <a
-            href={whatsappHref}
-            target="_blank"
-            rel="noopener noreferrer"
-            onClick={() => setSendPrompt(null)}
-            style={styles.tapAnywhere}
-            aria-label="הקישו כדי לפתוח את הוואטסאפ עם הרשימה"
-            autoFocus
-          >
-            <MessageCircle size={56} />
-            <span style={styles.tapAnywhereText}>הקישו בכל מקום כדי לפתוח את הוואטסאפ</span>
-            <span style={styles.tapAnywhereSub}>אחר כך בוחרים למי לשלוח</span>
-          </a>
-        )
+      {mailStep && (
+        <div style={{ ...styles.overlay, zIndex: 50 }} onClick={closeMailStep}>
+          <div style={styles.sheet} onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="mail-step-title">
+            <div style={styles.sheetHeader}>
+              <h3 id="mail-step-title" style={styles.sheetTitle}>
+                {mailStep === "confirm" ? "לשלוח את הרשימה במייל?" : "סיסמת שליחה"}
+              </h3>
+              <button onClick={closeMailStep} style={styles.sheetClose} aria-label="ביטול">
+                <X size={20} />
+              </button>
+            </div>
+            {mailStep === "confirm" ? (
+              <>
+                <p style={styles.mailStepText}>הרשימה ({finalItems.length} מוצרים) תישלח ל-karkur@politzer.co.il</p>
+                <div style={styles.mailStepBtns}>
+                  <button onClick={() => setMailStep("password")} className="chalk-btn" style={{ ...styles.confirmBtn, flex: 1 }} autoFocus>
+                    כן, להמשיך
+                  </button>
+                  <button onClick={closeMailStep} className="chalk-btn" style={{ ...styles.confirmBtn, ...styles.mailStepCancel, flex: 1 }}>
+                    ביטול
+                  </button>
+                </div>
+              </>
+            ) : (
+              <form onSubmit={submitMailPassword}>
+                <label htmlFor="mail-pw" style={styles.mailStepText}>הקלידו את סיסמת השליחה</label>
+                <input
+                  id="mail-pw"
+                  type="password"
+                  value={mailPw}
+                  onChange={(e) => { setMailPw(e.target.value); setMailPwError(""); }}
+                  style={{ ...styles.newProdInput, marginTop: 8, boxSizing: "border-box" }}
+                  autoComplete="off"
+                  autoFocus
+                />
+                {mailPwError && <p role="alert" style={styles.mailStepError}>{mailPwError}</p>}
+                <div style={styles.mailStepBtns}>
+                  <button type="submit" className="chalk-btn" style={{ ...styles.confirmBtn, flex: 1 }} disabled={!mailPw}>
+                    <Send size={16} style={{ marginInlineEnd: 6, verticalAlign: "-3px" }} />
+                    שלח
+                  </button>
+                  <button type="button" onClick={closeMailStep} className="chalk-btn" style={{ ...styles.confirmBtn, ...styles.mailStepCancel, flex: 1 }}>
+                    ביטול
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
+
+      {sendPrompt === "whatsapp" && (
+        <a
+          href={whatsappHref}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={() => setSendPrompt(null)}
+          style={styles.tapAnywhere}
+          aria-label="הקישו כדי לפתוח את הוואטסאפ עם הרשימה"
+          autoFocus
+        >
+          <MessageCircle size={56} />
+          <span style={styles.tapAnywhereText}>הקישו בכל מקום כדי לפתוח את הוואטסאפ</span>
+          <span style={styles.tapAnywhereSub}>אחר כך בוחרים למי לשלוח</span>
+        </a>
       )}
 
       {voiceError && (
@@ -2317,6 +2402,10 @@ const styles = {
   voiceStatus: { color: "#7C8574", fontSize: "0.72rem", marginTop: 4, borderTop: "1px solid #24302614", paddingTop: 4 },
   tapAnywhere: { position: "fixed", inset: 0, zIndex: 40, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 16, background: "#3E7C59", color: "#FFFFFF", border: "none", textDecoration: "none", fontFamily: "'Heebo', sans-serif", cursor: "pointer", padding: 24, textAlign: "center" },
   tapAnywhereText: { fontSize: "1.6rem", fontWeight: 700, lineHeight: 1.3 },
+  mailStepText: { display: "block", margin: "0 0 4px", color: "#243026", fontFamily: "'Heebo', sans-serif", fontSize: "0.95rem", textAlign: "right" },
+  mailStepBtns: { display: "flex", gap: 10 },
+  mailStepCancel: { background: "#FFFFFF", color: "#243026", border: "1px solid #24302633" },
+  mailStepError: { margin: "8px 0 0", color: "#C1554B", fontFamily: "'Heebo', sans-serif", fontSize: "0.9rem", fontWeight: 600 },
   tapAnywhereSub: { fontSize: "1.05rem", opacity: 0.9 },
   overlay: { position: "fixed", inset: 0, background: "#1E2216cc", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 10, padding: "0" },
   sheet: { width: "100%", maxWidth: 560, background: "#FFFFFF", borderRadius: "18px 18px 0 0", padding: "18px 18px 22px", maxHeight: "85vh", display: "flex", flexDirection: "column", boxShadow: "0 -8px 30px #00000022", border: "1px solid #24302622", borderBottom: "none" },
