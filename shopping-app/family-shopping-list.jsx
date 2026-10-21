@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { Plus, Check, ShoppingBasket, X, Users, Upload, FileText, Eye, ArrowRight, Send, MessageCircle, Save, History, Trash2, Mic } from "lucide-react";
-import { speakHe, stopSpeaking, primeSpeech, onSpeechStatus, MIC_HELP } from "./speech.js";
+import { speakHe, stopSpeaking, primeSpeech, onSpeechStatus, micTone, MIC_HELP } from "./speech.js";
 import { parseCommand, findProduct, findCategory, applyOp, speakItem, prettyHe, normHe, VOICE_HELP } from "./voice.js";
 
 const CATEGORIES = [
@@ -1078,6 +1078,8 @@ export default function ShoppingList() {
   const [voiceSaid, setVoiceSaid] = useState("");
   const [sendPrompt, setSendPrompt] = useState(null); // "mail" | "whatsapp": waits for one tap
   const [voiceError, setVoiceError] = useState("");
+  const [flashName, setFlashName] = useState("");
+  const [recInfo, setRecInfo] = useState("");
   const [speechInfo, setSpeechInfo] = useState({ engine: "google", state: "שקט", error: "" });
   useEffect(() => onSpeechStatus(setSpeechInfo), []);
   const voiceOnRef = useRef(false);
@@ -1087,6 +1089,7 @@ export default function ShoppingList() {
   const voiceHandlerRef = useRef(null);
   const speakTokenRef = useRef(0);
   const listenWatchRef = useRef(null);
+  const lastTouchedRef = useRef(null);
 
   // Speaks a voice-mode reply and shows it in the panel, then calls after().
   const speak = (raw, after) => {
@@ -1165,6 +1168,7 @@ export default function ShoppingList() {
     let got = false;
     rec.onresult = (e) => {
       got = true;
+      setRecInfo("");
       clearTimeout(listenWatchRef.current);
       missesRef.current = 0;
       const res = e.results[0];
@@ -1174,6 +1178,7 @@ export default function ShoppingList() {
     };
     rec.onerror = (e) => {
       got = true;
+      setRecInfo(`מיקרופון: ${e.error}`);
       clearTimeout(listenWatchRef.current);
       if (e.error === "not-allowed" || e.error === "service-not-allowed") {
         setVoiceError(MIC_HELP);
@@ -1194,6 +1199,7 @@ export default function ShoppingList() {
     };
     try {
       setVoiceState("listening");
+      micTone();
       rec.start();
     } catch (e) {
       setTimeout(() => voiceOnRef.current && listen(), 400);
@@ -1279,6 +1285,7 @@ export default function ShoppingList() {
         const r = applyOp(cur, { type, product: f.match, qty: ch.qty, kg: ch.kg }, makeItem, { maxKg: MAX_KG, kgCategory: KG_CATEGORY });
         cur = r.next;
         said.push(r.say);
+        lastTouchedRef.current = f.match;
         continue;
       }
       const rest = chunks.slice(k + 1);
@@ -1353,6 +1360,16 @@ export default function ShoppingList() {
     setActiveTab(category);
     pendingRef.current = { kind: "np_add", product: { name, category } };
     reply(`הוספתי את ${name} למחלקת ${label}. להוסיף אותו גם לרשימת הקניות? אמרו כן, או כן ומספר, או לא.`);
+  };
+
+  // Opens the tab of the product a voice command just changed and highlights its row,
+  // so the change is visible the same as when tapping it there.
+  const showTouched = () => {
+    const prod = lastTouchedRef.current;
+    if (!prod || showFinal || showSaved) return;
+    const inCatalog = CATEGORIES.some((c) => c.id === prod.category);
+    if (inCatalog && prod.category !== activeTab) setActiveTab(prod.category);
+    setFlashName(prod.name.trim());
   };
 
   const handleVoice = (alts) => {
@@ -1446,7 +1463,9 @@ export default function ShoppingList() {
       case "set":
       case "inc":
       case "dec":
+        lastTouchedRef.current = null;
         finishChunks(cmd.type, cmd.items);
+        showTouched();
         if (cur !== items) persist(cur, { quiet: true });
         reply(`${heard} ${said.join(" ")}`);
         return;
@@ -1478,7 +1497,7 @@ export default function ShoppingList() {
         if (cmd.type === "goto_category") {
           const all = catalogFor(cmd.category);
           const picked = all.filter((p) => alreadyInList(p.name)).length;
-          reply(`${heard} עברתי ללשונית ${label}. יש בה ${all.length} מוצרים${picked ? `, ${picked} מהם ברשימה` : ""}. כדי לשמוע אותם אמרו: מה יש כאן.`);
+          reply(`${label}.${picked ? ` ${picked} מוצרים כאן ברשימה.` : ""}`);
           return;
         }
         const list = catalogFor(cmd.category).map((p) => (alreadyInList(p.name) ? `${p.name}, נבחר` : p.name));
@@ -1562,6 +1581,18 @@ export default function ShoppingList() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!flashName) return;
+    const t1 = setTimeout(() => {
+      try {
+        const el = Array.from(document.querySelectorAll(".pick-row[data-name]")).find((e) => e.getAttribute("data-name") === flashName);
+        if (el) el.scrollIntoView({ block: "center", behavior: "smooth" });
+      } catch (e) { /* no row to show */ }
+    }, 80);
+    const t2 = setTimeout(() => setFlashName(""), 1800);
+    return () => { clearTimeout(t1); clearTimeout(t2); };
+  }, [flashName, activeTab]);
+
   // Every message the app shows is also said aloud. In voice mode the spoken reply already covers it.
   const sayShown = (text) => {
     if (!text || voiceOnRef.current || voiceState === "speaking") return;
@@ -1606,6 +1637,7 @@ export default function ShoppingList() {
         .tab-btn { transition: background .15s, color .15s; }
         .pick-row { transition: background .12s; }
         .pick-row:hover { background: #2430260d; }
+        .flash-row { background: #F5D98B88 !important; transition: background .3s; }
         @media (max-width: 400px) {
           .final-top-title { font-size: 1.4rem !important; }
           .final-top-btn { padding: 7px 12px !important; font-size: 0.78rem !important; }
@@ -1858,7 +1890,7 @@ export default function ShoppingList() {
               const qty = getListQty(item.name);
               const inList = qty > 0;
               return (
-                <div key={item.origName} className="pick-row" style={styles.pickRow}>
+                <div key={item.origName} className={`pick-row${flashName === item.name.trim() ? " flash-row" : ""}`} data-name={item.name.trim()} style={styles.pickRow}>
                   <button
                     onClick={() => toggleCheck(item.name, activeTab)}
                     style={{ ...styles.pickCheck, borderColor: inList ? catInfo(activeTab).color : "#24302655", background: inList ? catInfo(activeTab).color : "transparent", cursor: "pointer" }}
@@ -2180,6 +2212,7 @@ export default function ShoppingList() {
             {voiceState === "listening" ? "🎙️ מקשיב" : speechInfo.state === "מדבר" ? "🔊 מדבר" : "⏸"}
             {" · "}קול: {speechInfo.engine === "google" ? "Google" : "של הטלפון"}
             {speechInfo.error ? ` · ${speechInfo.error}` : ""}
+            {recInfo ? ` · ${recInfo}` : ""}
             {` · זיהוי דיבור: ${SpeechRec ? "יש" : "אין"} · גרסה ${APP_BUILD}`}
           </div>
         </div>

@@ -191,6 +191,29 @@ export function primeSpeech() {
   window.addEventListener("keydown", once, true);
 }
 
+// A short tone that says "the microphone is open, speak now". Android already beeps by itself,
+// so it plays only on iPhones and iPads.
+let toneCtx = null;
+export function micTone() {
+  try {
+    if (!/iPhone|iPad|iPod/.test(navigator.userAgent)) return;
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    if (!toneCtx) toneCtx = new AC();
+    if (toneCtx.state === "suspended") toneCtx.resume();
+    const o = toneCtx.createOscillator();
+    const g = toneCtx.createGain();
+    o.frequency.value = 880;
+    g.gain.setValueAtTime(0.18, toneCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, toneCtx.currentTime + 0.15);
+    o.connect(g).connect(toneCtx.destination);
+    o.start();
+    o.stop(toneCtx.currentTime + 0.16);
+  } catch (e) {
+    // no tone, the panel still shows "מקשיב"
+  }
+}
+
 export const MIC_HELP =
   "אין הרשאה למיקרופון, ולכן האפליקציה לא שומעת אתכם. כך מאשרים: " +
   "באייפון, בספארי: לוחצים על הסימן aA או על הסימן שמשמאל לכתובת האתר, בוחרים הגדרות אתר, ובשורה מיקרופון בוחרים אפשר. " +
