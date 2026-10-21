@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { Plus, Check, ShoppingBasket, X, Users, Upload, FileText, Eye, ArrowRight, Send, MessageCircle, Save, History, Trash2 } from "lucide-react";
+import { Plus, Check, ShoppingBasket, X, Users, Upload, FileText, Eye, ArrowRight, Send, MessageCircle, Save, History, Trash2, Mic } from "lucide-react";
+import { parseCommand, findProduct, applyOp, speakItem, prettyHe, normHe, VOICE_HELP } from "./voice.js";
 
 const CATEGORIES = [
   { id: "produce", label: "ירקות ופירות", color: "#8FB996", dark: "#4E7A5C" },
@@ -1041,6 +1042,377 @@ export default function ShoppingList() {
     setImportFileName("");
   };
 
+
+  // --- Voice control: speak to the app, and it says back what it heard and what it did ---
+  const SpeechRec = typeof window !== "undefined" ? window.SpeechRecognition || window.webkitSpeechRecognition : null;
+  const [voiceOn, setVoiceOn] = useState(false);
+  const [voiceState, setVoiceState] = useState("idle"); // idle | listening | speaking
+  const [voiceHeard, setVoiceHeard] = useState("");
+  const [voiceSaid, setVoiceSaid] = useState("");
+  const [sendPrompt, setSendPrompt] = useState(null); // "mail" | "whatsapp": waits for one tap
+  const voiceOnRef = useRef(false);
+  const recRef = useRef(null);
+  const pendingRef = useRef(null);
+  const missesRef = useRef(0);
+  const voiceHandlerRef = useRef(null);
+  const speakTokenRef = useRef(0);
+
+  const heVoice = () => {
+    try {
+      const vs = window.speechSynthesis.getVoices();
+      return vs.find((v) => /^(he|iw)/i.test(v.lang)) || null;
+    } catch (e) {
+      return null;
+    }
+  };
+
+  // Speaks sentence by sentence (long single utterances get cut off on some phones), then calls after().
+  const speak = (text, after) => {
+    const token = ++speakTokenRef.current;
+    setVoiceSaid(text);
+    const done = () => {
+      if (token !== speakTokenRef.current) return;
+      setVoiceState("idle");
+      if (after) after();
+    };
+    if (!("speechSynthesis" in window)) { done(); return; }
+    try { window.speechSynthesis.cancel(); } catch (e) { /* nothing to cancel */ }
+    const parts = text.replace(/([.?!:])\s+/g, "$1\n").split("\n").filter((t) => t.trim());
+    if (!parts.length) { done(); return; }
+    setVoiceState("speaking");
+    const voice = heVoice();
+    let i = 0;
+    let guard = null;
+    const next = () => {
+      clearTimeout(guard);
+      if (token !== speakTokenRef.current) return;
+      if (i >= parts.length) { done(); return; }
+      const u = new SpeechSynthesisUtterance(parts[i++]);
+      u.lang = "he-IL";
+      if (voice) u.voice = voice;
+      u.rate = 1;
+      u.onend = next;
+      u.onerror = next;
+      // If the phone never reports the end of speech, move on anyway.
+      guard = setTimeout(next, 2500 + u.text.length * 110);
+      window.speechSynthesis.speak(u);
+    };
+    next();
+  };
+
+  const stopVoice = (bye) => {
+    voiceOnRef.current = false;
+    setVoiceOn(false);
+    pendingRef.current = null;
+    try { recRef.current && recRef.current.abort(); } catch (e) { /* already stopped */ }
+    recRef.current = null;
+    if (bye) speak(bye);
+    else {
+      speakTokenRef.current++;
+      try { window.speechSynthesis.cancel(); } catch (e) { /* nothing to cancel */ }
+      setVoiceState("idle");
+    }
+  };
+
+  const listen = () => {
+    if (!voiceOnRef.current || !SpeechRec) return;
+    let rec;
+    try {
+      rec = new SpeechRec();
+    } catch (e) {
+      stopVoice("לא הצלחתי להפעיל את המיקרופון.");
+      return;
+    }
+    recRef.current = rec;
+    rec.lang = "he-IL";
+    rec.interimResults = false;
+    rec.continuous = false;
+    rec.maxAlternatives = 3;
+    let got = false;
+    rec.onresult = (e) => {
+      got = true;
+      missesRef.current = 0;
+      const res = e.results[0];
+      const alts = [];
+      for (let k = 0; k < res.length; k++) alts.push(res[k].transcript);
+      voiceHandlerRef.current(alts);
+    };
+    rec.onerror = (e) => {
+      got = true;
+      if (e.error === "not-allowed" || e.error === "service-not-allowed") {
+        stopVoice("אין הרשאה למיקרופון. צריך לאשר לדפדפן להשתמש במיקרופון, ואז ללחוץ שוב על כפתור הדיבור.");
+      } else if (e.error === "no-speech" || e.error === "aborted") {
+        if (!voiceOnRef.current) return;
+        missesRef.current += 1;
+        if (missesRef.current >= 3) stopVoice("לא שמעתי כלום, אז הפסקתי להקשיב. כדי לדבר שוב לוחצים על כפתור הדיבור.");
+        else listen();
+      } else if (e.error === "network") {
+        stopVoice("זיהוי הדיבור צריך חיבור לאינטרנט. בדקו את החיבור ונסו שוב.");
+      } else {
+        if (voiceOnRef.current) listen();
+      }
+    };
+    rec.onend = () => {
+      if (!got && voiceOnRef.current && recRef.current === rec) listen();
+    };
+    try {
+      setVoiceState("listening");
+      rec.start();
+    } catch (e) {
+      setTimeout(() => voiceOnRef.current && listen(), 400);
+    }
+  };
+
+  const reply = (text, { keepListening = true } = {}) => {
+    speak(text, () => {
+      if (keepListening && voiceOnRef.current) listen();
+    });
+  };
+
+  const toggleVoice = () => {
+    if (voiceOnRef.current) {
+      stopVoice("השליטה הקולית כבויה.");
+      return;
+    }
+    if (!SpeechRec) {
+      speak("הדפדפן הזה לא תומך בזיהוי דיבור. מומלץ לפתוח את האפליקציה בכרום באנדרואיד או בספארי באייפון.");
+      return;
+    }
+    voiceOnRef.current = true;
+    setVoiceOn(true);
+    missesRef.current = 0;
+    pendingRef.current = null;
+    let first = true;
+    try { first = !localStorage.getItem("drayman-voice-intro"); localStorage.setItem("drayman-voice-intro", "1"); } catch (e) { /* first stays true */ }
+    reply(first
+      ? "שליטה קולית פועלת. אחרי כל צפצוף או הפסקה אפשר לדבר. למשל: תוסיף 2 עגבניות שרי. כדי לשמוע את כל האפשרויות אמרו: עזרה. כדי לסיים אמרו: עצור."
+      : "מקשיב.");
+  };
+
+  // Every product the voice can name: the catalog, plus what's on the list.
+  const voiceProducts = () => {
+    const all = [];
+    const seen = new Set();
+    for (const c of CATEGORIES) {
+      for (const p of catalogFor(c.id)) {
+        const k = p.name.trim();
+        if (!seen.has(k)) { seen.add(k); all.push({ name: k, category: c.id }); }
+      }
+    }
+    for (const it of items) {
+      const k = it.name.trim();
+      if (!it.done && !seen.has(k)) { seen.add(k); all.push({ name: k, category: it.category }); }
+    }
+    return all;
+  };
+
+  const ORDINALS = [["ראשון", "ראשונה", "אחד", "אחת", "1"], ["שני", "שניה", "שנייה", "שתיים", "2"], ["שלישי", "שלישית", "שלוש", "3"], ["רביעי", "רביעית", "ארבע", "4"]];
+  const pickOption = (text, options) => {
+    const n = normHe(text);
+    for (let k = 0; k < Math.min(options.length, ORDINALS.length); k++) {
+      if (ORDINALS[k].some((w) => new RegExp(`(^|\\s)[ה]?${normHe(w)}(\\s|$)`).test(n))) return options[k];
+    }
+    const f = findProduct(text, options);
+    return f.match || null;
+  };
+
+  const sayOptions = (options) => options.map((o) => o.name).join(", או ");
+
+  // Runs add/remove/set chunks one after another. Stops to ask when a product is unclear or unknown.
+  const runChunks = (type, chunks, cur, said) => {
+    const products = voiceProducts();
+    for (let k = 0; k < chunks.length; k++) {
+      const ch = chunks[k];
+      const f = findProduct(ch.query, products);
+      if (f.match) {
+        const r = applyOp(cur, { type, product: f.match, qty: ch.qty, kg: ch.kg }, makeItem, { maxKg: MAX_KG, kgCategory: KG_CATEGORY });
+        cur = r.next;
+        said.push(r.say);
+        continue;
+      }
+      const rest = chunks.slice(k + 1);
+      if (f.options) {
+        pendingRef.current = { kind: "choose", type, chunk: ch, options: f.options, rest };
+        said.push(`יש כמה מוצרים שמתאימים: ${sayOptions(f.options)}. איזה מהם?`);
+      } else if (type === "add" || type === "set" || type === "inc") {
+        const name = prettyHe(ch.query);
+        pendingRef.current = { kind: "new_product", type, chunk: ch, name, rest };
+        said.push(`לא מצאתי ${name} ברשימת המוצרים. להוסיף אותו כמוצר חדש? אמרו כן או לא.`);
+      } else {
+        said.push(`${prettyHe(ch.query)} לא נמצא ברשימה.`);
+        continue;
+      }
+      return { cur, waiting: true };
+    }
+    return { cur, waiting: false };
+  };
+
+  const listSummary = () => {
+    if (finalItems.length === 0) return "הרשימה ריקה.";
+    const word = finalItems.length === 1 ? "מוצר אחד" : `${finalItems.length} מוצרים`;
+    return `ברשימה ${word}: ${finalItems.map((it) => speakItem(it)).join(", ")}.`;
+  };
+
+  const startSendPrompt = (kind, heard = "") => {
+    setShowSaved(false);
+    setShowFinal(true);
+    setSendPrompt(kind);
+    const where = kind === "mail" ? "המייל" : "הוואטסאפ";
+    const finish = kind === "mail" ? "ב-Gmail לוחצים על כפתור השליחה." : "בוואטסאפ בוחרים למי לשלוח.";
+    // Phones open mail and WhatsApp only after a real tap, so the whole screen becomes one button.
+    reply(`${heard} כדי לפתוח את ${where}, הקישו פעם אחת בכל מקום על המסך. אחר כך ${finish}`, { keepListening: false });
+    voiceOnRef.current = false;
+    setVoiceOn(false);
+  };
+
+  const handleVoice = (alts) => {
+    const products = voiceProducts();
+    const parsed = alts.map((t) => ({ text: t, cmd: parseCommand(t, products) }));
+    const pick = parsed.find((x) => x.cmd.type !== "unknown") || parsed[0];
+    const text = pick.text.trim();
+    const cmd = pick.cmd;
+    setVoiceHeard(text);
+    const heard = `שמעתי: ${text}.`;
+    const pending = pendingRef.current;
+    pendingRef.current = null;
+    const said = [];
+    let cur = items;
+
+    const finishChunks = (type, chunks) => {
+      const r = runChunks(type, chunks, cur, said);
+      cur = r.cur;
+    };
+
+    if (pending) {
+      if (pending.kind === "choose") {
+        const chosen = cmd.type === "no" ? null : pickOption(text, pending.options);
+        if (chosen) {
+          const r = applyOp(cur, { type: pending.type, product: chosen, qty: pending.chunk.qty, kg: pending.chunk.kg }, makeItem, { maxKg: MAX_KG, kgCategory: KG_CATEGORY });
+          cur = r.next;
+          said.push(r.say);
+          finishChunks(pending.type, pending.rest);
+          if (cur !== items) persist(cur);
+          reply(`${heard} ${said.join(" ")}`);
+          return;
+        }
+        if (cmd.type === "no") { reply(`${heard} בסדר, לא שיניתי כלום.`); return; }
+      } else if (pending.kind === "new_product") {
+        if (cmd.type === "yes") {
+          const product = { name: pending.name, category: guessCategory(pending.name) };
+          const r = applyOp(cur, { type: pending.type === "set" ? "set" : "add", product, qty: pending.chunk.qty, kg: pending.chunk.kg }, makeItem, { maxKg: MAX_KG, kgCategory: KG_CATEGORY });
+          cur = r.next;
+          said.push(`${r.say} במחלקת ${catInfo(product.category).label}.`);
+          finishChunks(pending.type, pending.rest);
+          persist(cur);
+          reply(`${heard} ${said.join(" ")}`);
+          return;
+        }
+        if (cmd.type === "no") {
+          said.push(`בסדר, לא הוספתי את ${pending.name}.`);
+          finishChunks(pending.type, pending.rest);
+          if (cur !== items) persist(cur);
+          reply(`${heard} ${said.join(" ")}`);
+          return;
+        }
+      } else if (pending.kind === "confirm") {
+        if (cmd.type === "yes") {
+          if (pending.action === "new_list") {
+            startNewList();
+            reply(`${heard} פתחתי רשימה חדשה וריקה. הרשימה הקודמת נשמרה ברשימות הקודמות.`);
+          } else {
+            startSendPrompt(pending.action === "send_mail" ? "mail" : "whatsapp", heard);
+          }
+          return;
+        }
+        if (cmd.type === "no") { reply(`${heard} בסדר, ביטלתי.`); return; }
+      }
+      // Anything else: drop the question and treat it as a new request.
+    }
+
+    switch (cmd.type) {
+      case "add":
+      case "remove":
+      case "set":
+      case "inc":
+      case "dec":
+        finishChunks(cmd.type, cmd.items);
+        if (cur !== items) persist(cur);
+        reply(`${heard} ${said.join(" ")}`);
+        return;
+      case "read_list":
+        reply(`${heard} ${listSummary()}`);
+        return;
+      case "ask_qty": {
+        const onList = finalItems.map((it) => ({ name: it.name.trim(), category: it.category }));
+        const f = findProduct(cmd.query, onList);
+        if (f.match) {
+          const it = finalItems.find((x) => x.name.trim() === f.match.name);
+          reply(`${heard} ברשימה יש ${speakItem(it)}.`);
+        } else if (f.options) {
+          reply(`${heard} ברשימה יש: ${f.options.map((o) => speakItem(finalItems.find((x) => x.name.trim() === o.name))).join(", ")}.`);
+        } else {
+          reply(`${heard} ${prettyHe(cmd.query) || "המוצר הזה"} לא נמצא ברשימה.`);
+        }
+        return;
+      }
+      case "read_category":
+      case "goto_category": {
+        setShowSaved(false);
+        setShowFinal(false);
+        setActiveTab(cmd.category);
+        const label = catInfo(cmd.category).label;
+        if (cmd.type === "goto_category") { reply(`${heard} עברתי למחלקת ${label}.`); return; }
+        const list = catalogFor(cmd.category).map((p) => (alreadyInList(p.name) ? `${p.name}, נבחר` : p.name));
+        reply(`${heard} במחלקת ${label} יש ${list.length} מוצרים: ${list.join(". ")}.`);
+        return;
+      }
+      case "summary":
+        setShowSaved(false);
+        setShowFinal(true);
+        reply(`${heard} עברתי לסיכום. ${listSummary()} כדי לשלוח אמרו: שלח במייל.`);
+        return;
+      case "back":
+        setShowSaved(false);
+        setShowFinal(false);
+        reply(`${heard} חזרתי לבחירת המוצרים, במחלקת ${catInfo(activeTab).label}.`);
+        return;
+      case "save":
+        reply(`${heard} ${saveCurrentList() ? "הרשימה נשמרה." : "הרשימה ריקה, אין מה לשמור."}`);
+        return;
+      case "new_list":
+        pendingRef.current = { kind: "confirm", action: "new_list" };
+        reply(`${heard} לפתוח רשימה חדשה וריקה? הרשימה הנוכחית תישמר ברשימות הקודמות. אמרו כן או לא.`);
+        return;
+      case "send_mail":
+      case "send_whatsapp": {
+        if (finalItems.length === 0) { reply(`${heard} הרשימה ריקה, אין מה לשלוח.`); return; }
+        pendingRef.current = { kind: "confirm", action: cmd.type };
+        const where = cmd.type === "send_mail" ? "במייל למכולת" : "בוואטסאפ";
+        reply(`${heard} ${listSummary()} לשלוח את הרשימה ${where}? אמרו כן או לא.`);
+        return;
+      }
+      case "help":
+        reply(`${heard} ${VOICE_HELP}`);
+        return;
+      case "stop":
+        stopVoice("השליטה הקולית כבויה. להתראות.");
+        return;
+      case "yes":
+      case "no":
+        reply(`${heard} אין כרגע שאלה פתוחה. מה תרצו לעשות?`);
+        return;
+      default:
+        reply(`${heard} לא הבנתי מה לעשות. אפשר לומר: עזרה.`);
+    }
+  };
+  voiceHandlerRef.current = handleVoice;
+
+  useEffect(() => () => {
+    voiceOnRef.current = false;
+    try { recRef.current && recRef.current.abort(); } catch (e) { /* already stopped */ }
+    try { window.speechSynthesis.cancel(); } catch (e) { /* nothing to cancel */ }
+  }, []);
+
   const remaining = items.filter((i) => !i.done).length;
   const doneCount = items.length - remaining;
 
@@ -1055,7 +1427,9 @@ export default function ShoppingList() {
         .item-row { animation: fadeIn 0.25s ease; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
         @keyframes sheetIn { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: translateY(0); } }
-        @media (prefers-reduced-motion: reduce) { .item-row, .sheet { animation: none !important; } }
+        @media (prefers-reduced-motion: reduce) { .item-row, .sheet, .voice-ring { animation: none !important; } }
+        .voice-ring { animation: voicePulse 1.2s ease-out infinite; }
+        @keyframes voicePulse { from { transform: scale(0.9); opacity: 1; } to { transform: scale(1.25); opacity: 0; } }
         .chalk-btn:active { transform: scale(0.96); }
         .sheet { animation: sheetIn 0.22s ease; }
         .tab-btn { transition: background .15s, color .15s; }
@@ -1313,7 +1687,7 @@ export default function ShoppingList() {
                   <button
                     onClick={() => toggleCheck(item.name, activeTab)}
                     style={{ ...styles.pickCheck, borderColor: inList ? catInfo(activeTab).color : "#24302655", background: inList ? catInfo(activeTab).color : "transparent", cursor: "pointer" }}
-                    aria-label={inList ? "בטל סימון" : "סמן"}
+                    aria-label={inList ? `הסר ${item.name} מהרשימה` : `הוסף ${item.name} לרשימה`} aria-pressed={inList}
                   >
                     {inList && <Check size={12} color="#243026" strokeWidth={3} />}
                   </button>
@@ -1456,7 +1830,7 @@ export default function ShoppingList() {
                   <button
                     onClick={() => toggleCheck(it.name, it.category)}
                     style={{ ...styles.pickCheck, borderColor: cat.color, background: cat.color, cursor: "pointer" }}
-                    aria-label="הסר פריט"
+                    aria-label={`הסר ${it.name} מהרשימה`}
                   >
                     <Check size={12} color="#243026" strokeWidth={3} />
                   </button>
@@ -1575,12 +1949,59 @@ export default function ShoppingList() {
           </div>
         </div>
       )}
+
+      {sendPrompt && (
+        sendPrompt === "mail" ? (
+          <button
+            onClick={() => { setSendPrompt(null); openMail(); }}
+            style={styles.tapAnywhere}
+            aria-label="הקישו כדי לפתוח את המייל עם הרשימה"
+            autoFocus
+          >
+            <Send size={56} />
+            <span style={styles.tapAnywhereText}>הקישו בכל מקום כדי לפתוח את המייל</span>
+            <span style={styles.tapAnywhereSub}>אחר כך לוחצים שליחה ב-Gmail</span>
+          </button>
+        ) : (
+          <a
+            href={whatsappHref}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={() => setSendPrompt(null)}
+            style={styles.tapAnywhere}
+            aria-label="הקישו כדי לפתוח את הוואטסאפ עם הרשימה"
+            autoFocus
+          >
+            <MessageCircle size={56} />
+            <span style={styles.tapAnywhereText}>הקישו בכל מקום כדי לפתוח את הוואטסאפ</span>
+            <span style={styles.tapAnywhereSub}>אחר כך בוחרים למי לשלוח</span>
+          </a>
+        )
+      )}
+
+      {(voiceOn || voiceState === "speaking") && (voiceHeard || voiceSaid) && (
+        <div style={styles.voicePanel} aria-hidden="true">
+          {voiceHeard && <div style={styles.voiceHeard}>שמעתי: {voiceHeard}</div>}
+          {voiceSaid && <div style={styles.voiceSaid}>{voiceSaid.replace(/^שמעתי: .*?\.\s*/, "")}</div>}
+        </div>
+      )}
+
+      <button
+        onClick={toggleVoice}
+        className="voice-btn"
+        style={{ ...styles.voiceBtn, background: voiceOn ? (voiceState === "listening" ? "#C1554B" : "#8C3931") : "#3E7C59" }}
+        aria-label={voiceOn ? "כבה שליטה קולית" : "הפעל שליטה קולית: לחצו ודברו"}
+        aria-pressed={voiceOn}
+      >
+        <Mic size={30} />
+        {voiceOn && voiceState === "listening" && <span className="voice-ring" style={styles.voiceRing} />}
+      </button>
     </div>
   );
 }
 
 const styles = {
-  page: { minHeight: "100vh", background: "radial-gradient(ellipse at top, #F7F8EF 0%, #EFF1E3 55%, #E6E9D7 100%)", padding: "28px 14px 60px", fontFamily: "'Heebo', sans-serif", position: "relative", display: "flex", justifyContent: "center" },
+  page: { minHeight: "100vh", background: "radial-gradient(ellipse at top, #F7F8EF 0%, #EFF1E3 55%, #E6E9D7 100%)", padding: "28px 14px 120px", fontFamily: "'Heebo', sans-serif", position: "relative", display: "flex", justifyContent: "center" },
   texture: { position: "fixed", inset: 0, pointerEvents: "none", opacity: 0.5, backgroundImage: "radial-gradient(rgba(36,48,38,0.035) 1px, transparent 1px), radial-gradient(rgba(36,48,38,0.03) 1px, transparent 1px)", backgroundSize: "3px 3px, 7px 7px", backgroundPosition: "0 0, 2px 3px" },
   board: { width: "100%", maxWidth: 560, position: "relative", zIndex: 1 },
   header: { textAlign: "center", marginBottom: 6 },
@@ -1646,6 +2067,14 @@ const styles = {
   summaryLabel: { display: "block", color: "#7C8574", fontSize: "0.75rem", marginBottom: 6 },
   summaryTextarea: { width: "100%", padding: "10px 12px", borderRadius: 10, border: "1px solid #24302633", background: "#FFFFFF", color: "#4B5347", fontFamily: "'Heebo', sans-serif", fontSize: "0.85rem", resize: "vertical", lineHeight: 1.6 },
 
+  voiceBtn: { position: "fixed", left: "max(16px, env(safe-area-inset-left, 0px))", bottom: "calc(18px + env(safe-area-inset-bottom, 0px))", width: 68, height: 68, borderRadius: "50%", border: "3px solid #FFFFFF", color: "#FFFFFF", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 6px 18px #00000040", cursor: "pointer", zIndex: 30, padding: 0 },
+  voiceRing: { position: "absolute", inset: -8, borderRadius: "50%", border: "3px solid #C1554B", pointerEvents: "none" },
+  voicePanel: { position: "fixed", left: "max(16px, env(safe-area-inset-left, 0px))", right: "max(16px, env(safe-area-inset-right, 0px))", bottom: "calc(98px + env(safe-area-inset-bottom, 0px))", maxWidth: 520, margin: "0 auto", background: "#FFFFFFF2", border: "1px solid #24302633", borderRadius: 14, padding: "10px 14px", boxShadow: "0 6px 20px #00000026", zIndex: 29, display: "flex", flexDirection: "column", gap: 4, maxHeight: "30vh", overflowY: "auto", direction: "rtl", textAlign: "right" },
+  voiceHeard: { color: "#7C8574", fontSize: "0.82rem" },
+  voiceSaid: { color: "#243026", fontSize: "0.95rem", fontWeight: 500, lineHeight: 1.5 },
+  tapAnywhere: { position: "fixed", inset: 0, zIndex: 40, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 16, background: "#3E7C59", color: "#FFFFFF", border: "none", textDecoration: "none", fontFamily: "'Heebo', sans-serif", cursor: "pointer", padding: 24, textAlign: "center" },
+  tapAnywhereText: { fontSize: "1.6rem", fontWeight: 700, lineHeight: 1.3 },
+  tapAnywhereSub: { fontSize: "1.05rem", opacity: 0.9 },
   overlay: { position: "fixed", inset: 0, background: "#1E2216cc", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 10, padding: "0" },
   sheet: { width: "100%", maxWidth: 560, background: "#FFFFFF", borderRadius: "18px 18px 0 0", padding: "18px 18px 22px", maxHeight: "85vh", display: "flex", flexDirection: "column", boxShadow: "0 -8px 30px #00000022", border: "1px solid #24302622", borderBottom: "none" },
   sheetHeader: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 },
