@@ -224,9 +224,30 @@ export function parseCommand(text, products = []) {
   if (has(n, ["חזור", "חזרה", "תחזור", "אחורה"]) && words.length <= 3) return { type: "back" };
   if (has(n, ["סיכום", "תסכם", "סכם"]) && words.length <= 4) return { type: "summary" };
   if ((has(n, ["מה ברשימה", "מה יש ברשימה", "תקריא", "הקרא", "תקריאי", "להקריא", "מה הרשימה", "מה בסל", "מה הזמנתי", "קרא את הרשימה", "תקרא"])) && !findCategory(n)) return { type: "read_list" };
-  if (has(n, ["כמה"])) {
-    const q = words.filter((w) => !["כמה", "יש", "ברשימה", "הזמנתי", "בחרתי", "שמתי", "יש לי"].includes(w)).join(" ");
+  // "כמה עגבניות יש ברשימה?", "מה הכמות של חלב סויה?"
+  if (has(n, ["כמה"]) || /(^|\s)(ה)?כמות(\s|$)/.test(n) && has(n, ["מה", "תגיד", "תגידי", "כמה"])) {
+    const skip = new Set(NORM(["כמה", "יש", "ברשימה", "הזמנתי", "בחרתי", "שמתי", "לי", "מה", "הכמות", "כמות", "של", "את", "תגיד", "תגידי", "לי", "מ", "ממוצר", "מהמוצר", "המוצר", "מוצר", "בסל", "רשמתי", "יחידות", "קילו"]));
+    const q = words.filter((w) => !skip.has(w)).join(" ");
     return { type: "ask_qty", query: q };
+  }
+  // "תוסיף מוצר חדש במבה למחלקת שונות": a new product in the catalog, in the named tab.
+  if (has(n, ["מוצר חדש"])) {
+    const cat = findCategory(n);
+    const filler = new Set(NORM(["תוסיף", "הוסף", "להוסיף", "תוסיפי", "תיצור", "צור", "מוצר", "חדש", "בשם", "שנקרא", "שקוראים", "לו", "ל", "ב", "את", "של", "מחלקת", "למחלקת", "במחלקת", "בקטגוריה", "לקטגוריה", "קטגוריה", "בלשונית", "ללשונית", "לשונית", "בטאב", "לטאב", "טאב", "תחת", "בתוך", "אל"]));
+    const catWords = new Set();
+    for (const [, ws] of CATEGORY_WORDS) for (const w of ws) for (const t of normHe(w).split(" ")) catWords.add(t);
+    const isCatWord = (w) => catWords.has(w) || catWords.has(w.slice(1)) || catWords.has(w.slice(2));
+    // The name is what comes before the tab words ("במבה למחלקת שונות"); tab words after it aren't part of it.
+    const kept = [];
+    let inCat = false;
+    for (const w of words) {
+      if (/^(ל|ב)?(מחלקת|קטגוריה|לשונית|טאב)$/.test(w) || (cat && isCatWord(w) && /^[לב]/.test(w))) inCat = true;
+      if (inCat) continue;
+      if (filler.has(w)) continue;
+      kept.push(w);
+    }
+    const name = kept.join(" ");
+    if (name || cat) return { type: "new_product", name: prettyHe(name), category: cat };
   }
   if (has(n, ["רשימות קודמות", "רשימות שמורות", "רשימות ישנות", "היסטוריה", "הרשימות הקודמות"])) return { type: "goto_saved" };
   if (has(n, ["ייבוא", "יבוא", "תייבא", "לייבא", "ייבא"])) return { type: "goto_import" };
@@ -344,6 +365,6 @@ export const VOICE_HELP =
   "אפשר לומר למשל: תוסיף 2 עגבניות שרי. או: 2 קילו שוק הודו. " +
   "כדי לשנות כמות: תשנה מלפפונים ל-4. או: עוד חלב, פחות חלב. " +
   "כדי להוריד: תוריד גבינה. " +
-  "כדי לשמוע: מה ברשימה, או: מה יש בבשר ודגים, או: כמה עגבניות. " +
+  "כדי לשמוע: מה ברשימה, או: מה יש בבשר ודגים, או: מה הכמות של עגבניות שרי. כדי להוסיף מוצר חדש למחלקה: מוצר חדש במבה למחלקת שונות. " +
   "כדי לעבור לשונית אומרים את שמה, למשל: בשר ודגים, או: מוצרי חלב. ועוד: מה יש כאן, סיכום, רשימות קודמות, מוצר חדש, ייבוא, חזור, שמור, רשימה חדשה, שלח במייל, שלח בוואטסאפ. " +
   "כדי לסיים אמרו: עצור.";

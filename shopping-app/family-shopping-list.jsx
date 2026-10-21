@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { Plus, Check, ShoppingBasket, X, Users, Upload, FileText, Eye, ArrowRight, Send, MessageCircle, Save, History, Trash2, Mic } from "lucide-react";
 import { speakHe, stopSpeaking, primeSpeech, onSpeechStatus, MIC_HELP } from "./speech.js";
-import { parseCommand, findProduct, applyOp, speakItem, prettyHe, normHe, VOICE_HELP } from "./voice.js";
+import { parseCommand, findProduct, findCategory, applyOp, speakItem, prettyHe, normHe, VOICE_HELP } from "./voice.js";
 
 const CATEGORIES = [
   { id: "produce", label: "ירקות ופירות", color: "#8FB996", dark: "#4E7A5C" },
@@ -1316,6 +1316,45 @@ export default function ShoppingList() {
     setVoiceOn(false);
   };
 
+  const CATEGORY_CHOICES = `המחלקות הן: ${CATEGORIES.map((c) => c.label).join(", ")}.`;
+  const findCategoryOf = (text) => {
+    const direct = findCategory(text);
+    if (direct) return direct;
+    const n = normHe(text);
+    const hit = CATEGORIES.find((c) => n.includes(normHe(c.label)));
+    return hit ? hit.id : null;
+  };
+
+  // Adds a new product to a tab's catalog by voice, asking for whatever is missing.
+  const createProductByVoice = (name, category) => {
+    if (!name) {
+      pendingRef.current = { kind: "np_name", category };
+      reply("מה שם המוצר החדש?");
+      return;
+    }
+    if (!category) {
+      pendingRef.current = { kind: "np_cat", name };
+      reply(`לאיזו מחלקה להוסיף את ${name}? ${CATEGORY_CHOICES}`);
+      return;
+    }
+    const label = catInfo(category).label;
+    for (const c of CATEGORIES) {
+      const hit = catalogFor(c.id).find((p) => normHe(p.name) === normHe(name));
+      if (hit) {
+        pendingRef.current = { kind: "np_add", product: { name: hit.name, category: c.id } };
+        reply(`${hit.name} כבר קיים במחלקת ${catInfo(c.id).label}. להוסיף אותו לרשימת הקניות? אמרו כן או לא.`);
+        return;
+      }
+    }
+    const product = { id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, name, note: "", category };
+    persistCustom([...customProducts, product]);
+    setShowSaved(false);
+    setShowFinal(false);
+    setActiveTab(category);
+    pendingRef.current = { kind: "np_add", product: { name, category } };
+    reply(`הוספתי את ${name} למחלקת ${label}. להוסיף אותו גם לרשימת הקניות? אמרו כן, או כן ומספר, או לא.`);
+  };
+
   const handleVoice = (alts) => {
     const products = voiceProducts();
     const parsed = alts.map((t) => ({ text: t, cmd: parseCommand(t, products) }));
@@ -1366,6 +1405,26 @@ export default function ShoppingList() {
           reply(`${heard} ${said.join(" ")}`);
           return;
         }
+      } else if (pending.kind === "np_name") {
+        if (cmd.type === "no") { reply("בסדר, לא הוספתי מוצר."); return; }
+        createProductByVoice(prettyHe(normHe(text)), pending.category);
+        return;
+      } else if (pending.kind === "np_cat") {
+        if (cmd.type === "no") { reply("בסדר, לא הוספתי מוצר."); return; }
+        const cat = findCategoryOf(text);
+        if (cat) { createProductByVoice(pending.name, cat); return; }
+        pendingRef.current = pending;
+        reply(`לא הבנתי איזו מחלקה. ${CATEGORY_CHOICES}`);
+        return;
+      } else if (pending.kind === "np_add") {
+        if (cmd.type === "yes" || cmd.type === "add") {
+          const m = normHe(text).match(/\d+/);
+          const r = applyOp(cur, { type: "add", product: pending.product, qty: m ? parseInt(m[0], 10) : null, kg: null }, makeItem, { maxKg: MAX_KG, kgCategory: KG_CATEGORY });
+          persist(r.next, { quiet: true });
+          reply(r.say);
+          return;
+        }
+        if (cmd.type === "no") { reply(`בסדר. ${pending.product.name} נשאר במחלקה, ולא נוסף לרשימה.`); return; }
       } else if (pending.kind === "confirm") {
         if (cmd.type === "yes") {
           if (pending.action === "new_list") {
@@ -1396,14 +1455,17 @@ export default function ShoppingList() {
         return;
       case "ask_qty": {
         const onList = finalItems.map((it) => ({ name: it.name.trim(), category: it.category }));
-        const f = findProduct(cmd.query, onList);
+        let f = findProduct(cmd.query, onList);
+        // "כמה יש מחלב סויה": try again without the "מ" in front.
+        if (!f.match && !f.options && /^מ\S{2,}/.test(cmd.query)) f = findProduct(cmd.query.slice(1), onList);
         if (f.match) {
           const it = finalItems.find((x) => x.name.trim() === f.match.name);
           reply(`${heard} ברשימה יש ${speakItem(it)}.`);
         } else if (f.options) {
           reply(`${heard} ברשימה יש: ${f.options.map((o) => speakItem(finalItems.find((x) => x.name.trim() === o.name))).join(", ")}.`);
         } else {
-          reply(`${heard} ${prettyHe(cmd.query) || "המוצר הזה"} לא נמצא ברשימה.`);
+          const inCatalog = findProduct(cmd.query, voiceProducts()).match;
+          reply(`${heard} ${inCatalog ? inCatalog.name : prettyHe(cmd.query) || "המוצר הזה"} לא נמצא ברשימה. הכמות שלו אפס.`);
         }
         return;
       }
@@ -1423,6 +1485,9 @@ export default function ShoppingList() {
         reply(`${heard} במחלקת ${label} יש ${list.length} מוצרים: ${list.join(". ")}.`);
         return;
       }
+      case "new_product":
+        createProductByVoice(cmd.name, cmd.category);
+        return;
       case "goto_saved":
         setShowFinal(false);
         setShowSaved(true);
