@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { Plus, Check, ShoppingBasket, X, Users, Upload, FileText, Eye, ArrowRight, Send, MessageCircle, Save, History, Trash2, Mic, Volume2, Square } from "lucide-react";
-import { speakHe, stopSpeaking, primeSpeech, hasHebrewVoice, MIC_HELP, NO_HEBREW_VOICE } from "./speech.js";
+import { speakHe, stopSpeaking, primeSpeech, onSpeechStatus, MIC_HELP } from "./speech.js";
 import { parseCommand, findProduct, applyOp, speakItem, prettyHe, normHe, VOICE_HELP } from "./voice.js";
 
 const CATEGORIES = [
@@ -1053,6 +1053,8 @@ export default function ShoppingList() {
   const [sendPrompt, setSendPrompt] = useState(null); // "mail" | "whatsapp": waits for one tap
   const [voiceError, setVoiceError] = useState("");
   const [readingList, setReadingList] = useState(false);
+  const [speechInfo, setSpeechInfo] = useState({ engine: "google", state: "שקט", error: "" });
+  useEffect(() => onSpeechStatus(setSpeechInfo), []);
   const voiceOnRef = useRef(false);
   const recRef = useRef(null);
   const pendingRef = useRef(null);
@@ -1153,7 +1155,6 @@ export default function ShoppingList() {
       speak("הדפדפן הזה לא תומך בזיהוי דיבור. מומלץ לפתוח את האפליקציה בכרום באנדרואיד או בספארי באייפון.");
       return;
     }
-    if (hasHebrewVoice() === false) setVoiceError(NO_HEBREW_VOICE);
     voiceOnRef.current = true;
     setVoiceOn(true);
     missesRef.current = 0;
@@ -1226,7 +1227,7 @@ export default function ShoppingList() {
   const listSummary = () => {
     if (finalItems.length === 0) return "הרשימה ריקה.";
     const word = finalItems.length === 1 ? "מוצר אחד" : `${finalItems.length} מוצרים`;
-    return `ברשימה ${word}: ${finalItems.map((it) => speakItem(it)).join(", ")}.`;
+    return `ברשימה ${word}:\n${finalItems.map((it) => `${speakItem(it)}.`).join("\n")}`;
   };
 
   const startSendPrompt = (kind, heard = "") => {
@@ -1428,10 +1429,12 @@ export default function ShoppingList() {
       setReadingList(false);
       return;
     }
-    if (hasHebrewVoice() === false) setVoiceError(NO_HEBREW_VOICE);
     if (voiceOnRef.current) stopVoice();
     setReadingList(true);
-    speakHe(listSummary(), () => setReadingList(false));
+    setVoiceHeard("");
+    const text = listSummary();
+    setVoiceSaid(text);
+    speakHe(text, () => setReadingList(false));
   };
 
   // Every message the app shows is also said aloud. In voice mode the spoken reply already covers it.
@@ -2035,10 +2038,15 @@ export default function ShoppingList() {
         </div>
       )}
 
-      {!voiceError && (voiceOn || voiceState === "speaking") && (voiceHeard || voiceSaid) && (
+      {!voiceError && (voiceOn || voiceState === "speaking" || readingList) && (voiceHeard || voiceSaid) && (
         <div style={styles.voicePanel} aria-hidden="true">
-          {voiceHeard && <div style={styles.voiceHeard}>שמעתי: {voiceHeard}</div>}
+          {voiceHeard && voiceOn && <div style={styles.voiceHeard}>שמעתי: {voiceHeard}</div>}
           {voiceSaid && <div style={styles.voiceSaid}>{voiceSaid.replace(/^שמעתי: .*?\.\s*/, "")}</div>}
+          <div style={styles.voiceStatus}>
+            {voiceState === "listening" ? "🎙️ מקשיב" : speechInfo.state === "מדבר" ? "🔊 מדבר" : "⏸"}
+            {" · "}קול: {speechInfo.engine === "google" ? "Google" : "של הטלפון"}
+            {speechInfo.error ? ` · ${speechInfo.error}` : ""}
+          </div>
         </div>
       )}
 
@@ -2138,7 +2146,8 @@ const styles = {
   voiceRing: { position: "absolute", inset: -8, borderRadius: "50%", border: "3px solid #C1554B", pointerEvents: "none" },
   voicePanel: { position: "fixed", left: "max(16px, env(safe-area-inset-left, 0px))", right: "max(16px, env(safe-area-inset-right, 0px))", bottom: "calc(166px + env(safe-area-inset-bottom, 0px))", maxWidth: 520, margin: "0 auto", background: "#FFFFFFF2", border: "1px solid #24302633", borderRadius: 14, padding: "10px 14px", boxShadow: "0 6px 20px #00000026", zIndex: 29, display: "flex", flexDirection: "column", gap: 4, maxHeight: "30vh", overflowY: "auto", direction: "rtl", textAlign: "right" },
   voiceHeard: { color: "#7C8574", fontSize: "0.82rem" },
-  voiceSaid: { color: "#243026", fontSize: "0.95rem", fontWeight: 500, lineHeight: 1.5 },
+  voiceSaid: { color: "#243026", fontSize: "0.95rem", fontWeight: 500, lineHeight: 1.5, whiteSpace: "pre-line" },
+  voiceStatus: { color: "#7C8574", fontSize: "0.72rem", marginTop: 4, borderTop: "1px solid #24302614", paddingTop: 4 },
   tapAnywhere: { position: "fixed", inset: 0, zIndex: 40, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 16, background: "#3E7C59", color: "#FFFFFF", border: "none", textDecoration: "none", fontFamily: "'Heebo', sans-serif", cursor: "pointer", padding: 24, textAlign: "center" },
   tapAnywhereText: { fontSize: "1.6rem", fontWeight: 700, lineHeight: 1.3 },
   tapAnywhereSub: { fontSize: "1.05rem", opacity: 0.9 },

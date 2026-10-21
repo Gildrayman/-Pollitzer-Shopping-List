@@ -18,16 +18,6 @@ function hebrewVoice() {
   }
 }
 
-// Phones load their voices a moment after the page opens; wait for them (up to 1.5s) once.
-function whenVoicesReady(cb) {
-  const s = synth();
-  if (!s || voicesReady || s.getVoices().length) { voicesReady = true; cb(); return; }
-  let fired = false;
-  const go = () => { if (fired) return; fired = true; voicesReady = true; cb(); };
-  try { s.addEventListener("voiceschanged", go, { once: true }); } catch (e) { /* old browser */ }
-  setTimeout(go, 1500);
-}
-
 // True when the phone has a Hebrew voice, false when it surely has none, null while unknown.
 export function hasHebrewVoice() {
   const s = synth();
@@ -37,51 +27,136 @@ export function hasHebrewVoice() {
   return vs.some((v) => /^(he|iw)/i.test(v.lang));
 }
 
-// Speaks sentence by sentence (long single utterances get cut off on some phones), then calls onDone.
-// A newer call cuts off an older one.
+// What the speech is doing right now, shown on screen so a problem can be seen and reported.
+const status = { engine: "google", state: "שקט", error: "" };
+const listeners = new Set();
+function setStatus(patch) {
+  Object.assign(status, patch);
+  listeners.forEach((fn) => { try { fn({ ...status }); } catch (e) { /* ignore */ } });
+}
+export function onSpeechStatus(fn) {
+  listeners.add(fn);
+  fn({ ...status });
+  return () => listeners.delete(fn);
+}
+
+// Google's Hebrew voice, played as ordinary audio. It works on phones with no Hebrew voice
+// installed, and audio isn't silenced by the iPhone's silent switch the way built-in speech can be.
+const TTS_URLS = [
+  (q) => `https://translate.googleapis.com/translate_tts?ie=UTF-8&tl=iw&client=gtx&q=${encodeURIComponent(q)}`,
+  (q) => `https://translate.google.com/translate_tts?ie=UTF-8&tl=iw&client=tw-ob&q=${encodeURIComponent(q)}`,
+];
+let player = null;
+let audioBroken = false;
+function getPlayer() {
+  if (!player && typeof Audio !== "undefined") {
+    player = new Audio();
+    player.preload = "auto";
+  }
+  return player;
+}
+
+// Splits text into short pieces: one per sentence or line, and long ones at commas (the audio takes up to ~180 letters).
+function splitParts(text) {
+  const out = [];
+  const pieces = String(text).replace(/[✓✔]/g, "").replace(/([.?!])\s+/g, "$1\n").split("\n");
+  for (let p of pieces) {
+    p = p.trim();
+    if (!p) continue;
+    while (p.length > 180) {
+      let cut = p.lastIndexOf(",", 180);
+      if (cut < 60) cut = p.lastIndexOf(" ", 180);
+      if (cut < 1) cut = 180;
+      out.push(p.slice(0, cut + 1).trim());
+      p = p.slice(cut + 1).trim();
+    }
+    if (p) out.push(p);
+  }
+  // Join short sentences back together, so each request carries as much as it can.
+  const merged = [];
+  for (const p of out) {
+    const last = merged[merged.length - 1];
+    if (last && last.length + p.length + 1 <= 180) merged[merged.length - 1] = `${last} ${p}`;
+    else merged.push(p);
+  }
+  return merged;
+}
+
+function speakPartSynth(part, onEnd, mine) {
+  const s = synth();
+  if (!s) { onEnd(); return; }
+  const u = new SpeechSynthesisUtterance(part);
+  u.lang = "he-IL";
+  const voice = hebrewVoice();
+  if (voice) u.voice = voice;
+  let finished = false;
+  const end = () => { if (finished) return; finished = true; clearTimeout(guard); onEnd(); };
+  u.onend = end;
+  u.onerror = (e) => { setStatus({ error: `קול הטלפון: ${e && e.error ? e.error : "שגיאה"}` }); end(); };
+  // If the phone never reports the end of speech, move on anyway.
+  const guard = setTimeout(end, 3000 + part.length * 120);
+  try {
+    if (s.paused) s.resume();
+    s.speak(u);
+  } catch (e) {
+    end();
+  }
+}
+
+function speakPartAudio(part, onEnd, onFail, mine, urlIdx = 0) {
+  const a = getPlayer();
+  if (!a) { onFail(); return; }
+  let settled = false;
+  const finish = (fn) => { if (settled) return; settled = true; clearTimeout(guard); a.onended = null; a.onerror = null; fn(); };
+  const guard = setTimeout(() => finish(onEnd), 6000 + part.length * 150);
+  a.onended = () => finish(onEnd);
+  a.onerror = () => finish(() => (urlIdx + 1 < TTS_URLS.length ? speakPartAudio(part, onEnd, onFail, mine, urlIdx + 1) : onFail("לא נטען")));
+  a.src = TTS_URLS[urlIdx](part);
+  const pr = a.play();
+  if (pr && pr.catch) pr.catch((e) => finish(() => onFail(e && e.name === "NotAllowedError" ? "הדפדפן חסם השמעה" : "לא התנגן")));
+}
+
+// Speaks the text, piece by piece, then calls onDone. A newer call cuts off an older one.
 export function speakHe(text, onDone) {
   const mine = ++token;
   const done = () => {
-    if (mine === token && onDone) onDone();
+    if (mine !== token) return;
+    setStatus({ state: "שקט" });
+    if (onDone) onDone();
   };
-  const s = synth();
-  if (!s || !text) { done(); return; }
-  const parts = String(text).replace(/[✓✔]/g, "").replace(/([.?!:])\s+/g, "$1\n").split("\n").filter((t) => t.trim());
+  const parts = text ? splitParts(text) : [];
   if (!parts.length) { done(); return; }
-  // Some phones drop an utterance that comes right after cancel(), so cancel only when needed and pause briefly.
+  try { if (player) player.pause(); } catch (e) { /* not playing */ }
+  const s = synth();
   let wasBusy = false;
-  try { wasBusy = s.speaking || s.pending; if (wasBusy) s.cancel(); } catch (e) { /* nothing to cancel */ }
+  try { if (s) { wasBusy = s.speaking || s.pending; if (wasBusy) s.cancel(); } } catch (e) { /* nothing to cancel */ }
   let i = 0;
-  let guard = null;
   const next = () => {
-    clearTimeout(guard);
     if (mine !== token) return;
     if (i >= parts.length) { done(); return; }
-    const u = new SpeechSynthesisUtterance(parts[i++]);
-    u.lang = "he-IL";
-    const voice = hebrewVoice();
-    if (voice) u.voice = voice;
-    u.rate = 1;
-    u.volume = 1;
-    u.onend = next;
-    u.onerror = next;
-    // If the phone never reports the end of speech, move on anyway.
-    guard = setTimeout(next, 3000 + u.text.length * 120);
-    try {
-      if (s.paused) s.resume();
-      s.speak(u);
-    } catch (e) {
-      next();
+    const part = parts[i++];
+    if (!audioBroken) {
+      setStatus({ engine: "google", state: "מדבר" });
+      speakPartAudio(part, next, (why) => {
+        // Google's audio didn't play: use the phone's own voice from here on.
+        audioBroken = true;
+        setStatus({ engine: "phone", state: "מדבר", error: `קול Google: ${why || "שגיאה"}` });
+        speakPartSynth(part, next, mine);
+      }, mine);
+    } else {
+      setStatus({ engine: "phone", state: "מדבר" });
+      speakPartSynth(part, next, mine);
     }
   };
-  const begin = () => (wasBusy ? setTimeout(next, 120) : next());
-  if (voicesReady || s.getVoices().length) begin();
-  else whenVoicesReady(begin);
+  if (wasBusy) setTimeout(next, 120);
+  else next();
 }
 
 export function stopSpeaking() {
   token++;
+  try { if (player) player.pause(); } catch (e) { /* not playing */ }
   try { window.speechSynthesis.cancel(); } catch (e) { /* nothing to cancel */ }
+  setStatus({ state: "שקט" });
 }
 
 // iPhones speak only after the first touch on the page; a silent utterance on that touch
@@ -92,6 +167,17 @@ export function primeSpeech() {
   const once = () => {
     window.removeEventListener("pointerdown", once, true);
     window.removeEventListener("keydown", once, true);
+    try {
+      // A tiny silent sound unlocks the audio player for later messages.
+      const a = getPlayer();
+      if (a && !a.src) {
+        a.src = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=";
+        const pr = a.play();
+        if (pr && pr.catch) pr.catch(() => {});
+      }
+    } catch (e) {
+      // audio not available
+    }
     try {
       const u = new SpeechSynthesisUtterance(".");
       u.volume = 0;

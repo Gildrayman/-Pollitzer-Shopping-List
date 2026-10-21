@@ -16,7 +16,7 @@ const VERBS = {
   remove: ["תוריד", "הורד", "להוריד", "תורידי", "תמחק", "מחק", "למחוק", "תמחקי", "הסר", "תסיר", "להסיר", "תסירי", "בטל", "תבטל", "לבטל", "תבטלי", "בלי"],
   set: ["שנה", "תשנה", "לשנות", "תשני", "עדכן", "תעדכן", "לעדכן", "תעדכני", "קבע", "תקבע", "תקבעי", "כמות"],
   inc: ["עוד", "תגדיל", "הגדל", "להגדיל", "תגדילי", "תעלה", "הוסף עוד"],
-  dec: ["פחות", "תקטין", "הקטן", "להקטין", "תקטיני", "תפחית", "הפחת"],
+  dec: ["פחות", "תקטין", "הקטן", "להקטין", "תקטיני", "תפחית", "הפחת", "להפחית", "תפחיתי", "תחסיר", "החסר", "להחסיר", "תחסירי", "מינוס"],
 };
 
 const CATEGORY_WORDS = [
@@ -246,23 +246,25 @@ export function parseCommand(text, products = []) {
     return { type: isRead ? "read_category" : "goto_category", category: cat };
   }
 
-  let type = null;
-  let start = 0;
-  // A verb may be two words ("הוסף עוד", "אני רוצה"), so look at the first two.
-  for (let k = 0; k < Math.min(2, words.length); k++) {
-    const w = words[k];
-    for (const t of ["remove", "set", "inc", "dec", "add"]) {
-      if (V[t].has(w)) {
-        if (!type || (type === "add" && t !== "add")) type = t;
-        start = k + 1;
-      }
-    }
-    if (!type) break;
+  // Verbs may come anywhere ("עגבניות שרי פחות 1"), so pick them out of the whole sentence.
+  const found = new Set();
+  const tokens = [];
+  for (const w of words) {
+    let verb = null;
+    for (const t of ["dec", "inc", "remove", "set", "add"]) if (V[t].has(w)) { verb = t; break; }
+    if (verb) found.add(verb);
+    else tokens.push(w);
   }
-  const tokens = words.slice(start);
   const chunks = splitChunks(tokens, products).map((c) => readChunk(c, products)).filter((c) => c.query);
   if (!chunks.length) return { type: "unknown" };
-  if (!type) type = chunks.some((c) => c.explicitSet) ? "set" : "add";
+  const withNumber = chunks.every((c) => c.qty != null || c.kg != null);
+  let type;
+  if (chunks.some((c) => c.explicitSet) || found.has("set")) type = "set";
+  else if (found.has("dec")) type = "dec";
+  // "תוריד 1 עגבניות" lowers the amount; "תוריד עגבניות" takes the product off the list.
+  else if (found.has("remove")) type = withNumber ? "dec" : "remove";
+  else if (found.has("inc")) type = "inc";
+  else type = "add";
   return { type, items: chunks };
 }
 
@@ -302,7 +304,7 @@ export function applyOp(items, op, makeItem, { maxQty = 20, maxKg = 10, kgCatego
       if (!existing) return { next: items, say: `${name} לא נמצא ברשימה.` };
       const left = qtyOf(existing) - step;
       if (left <= 0) return { next: items.filter((_, i) => i !== idx), say: `הורדתי ${name} מהרשימה.` };
-      return { next: replace({ ...existing, qty: String(left) }), say: `הורדתי. עכשיו ${left} ${name}.` };
+      return { next: replace({ ...existing, qty: String(left) }), say: `הורדתי. עכשיו ${speakItem({ ...existing, qty: String(left) })}.` };
     }
     if (!existing) {
       const q = clampQ(step) || 1;
@@ -310,7 +312,7 @@ export function applyOp(items, op, makeItem, { maxQty = 20, maxKg = 10, kgCatego
       return { next: [it, ...items], say: `הוספתי ${speakItem(it)}.` };
     }
     const q = clampQ(qtyOf(existing) + step);
-    return { next: replace({ ...existing, qty: String(q) }), say: `הוספתי. עכשיו ${q} ${name}.` };
+    return { next: replace({ ...existing, qty: String(q) }), say: `הוספתי. עכשיו ${speakItem({ ...existing, qty: String(q) })}.` };
   }
   if (op.type === "set") {
     if (wantQty === 0 && wantKg == null) {
@@ -325,12 +327,13 @@ export function applyOp(items, op, makeItem, { maxQty = 20, maxKg = 10, kgCatego
     return { next, say: `עדכנתי: ${speakItem(upd)}.${kgNote}` };
   }
   // add
+  // A product already on the list takes the amount just said, higher or lower ("עגבניות 1" after 3 gives 1).
   if (existing) {
     const upd = { ...existing };
     if (wantKg != null) upd.kg = wantKg;
-    if (wantQty != null) upd.qty = String(clampQ(wantKg != null ? wantQty : qtyOf(existing) + wantQty) || 1);
+    if (wantQty != null) upd.qty = String(clampQ(wantQty) || 1);
     else if (wantKg == null) upd.qty = String(clampQ(qtyOf(existing) + 1));
-    return { next: replace(upd), say: `${name} כבר היה ברשימה. עכשיו: ${speakItem(upd)}.${kgNote}` };
+    return { next: replace(upd), say: `עדכנתי: ${speakItem(upd)}.${kgNote}` };
   }
   const it = makeItem(name, op.product.category, String(clampQ(wantQty || 1) || 1));
   if (wantKg != null) it.kg = wantKg;
