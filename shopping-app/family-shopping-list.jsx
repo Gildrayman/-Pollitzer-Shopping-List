@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { Plus, Check, ShoppingBasket, X, Users, Upload, FileText, Eye, ArrowRight, Send, MessageCircle, Save, History, Trash2, Mic } from "lucide-react";
-import { isFamilyPassword } from "./auth.js";
+import { isSendPassword } from "./auth.js";
 import { speakHe, stopSpeaking, primeSpeech, onSpeechStatus, micTone, MIC_HELP } from "./speech.js";
 import { parseCommand, findProduct, findCategory, applyOp, speakItem, prettyHe, normHe, VOICE_HELP } from "./voice.js";
 
@@ -1004,7 +1004,7 @@ export default function ShoppingList() {
   // The tap on "שלח" counts as the user's own tap, so the phone lets the mail app open.
   const submitMailPassword = (e) => {
     if (e) e.preventDefault();
-    if (!isFamilyPassword(mailPw)) {
+    if (!isSendPassword(mailPw)) {
       setMailPw("");
       setMailPwError("הסיסמה שגויה. נסו שוב.");
       return;

@@ -1,4 +1,4 @@
-// Password checking shared by the login screen and the send-mail step.
+// Password checks for the login screen and the send-mail step.
 
 // SHA-256 of the family password. Only the hash is kept in the code, so the
 // password itself can't be read from the public repository.
@@ -47,4 +47,7 @@ export function sha256(text) {
   return H.map((x) => (x >>> 0).toString(16).padStart(8, "0")).join("");
 }
 
-export const isFamilyPassword = (value) => sha256(String(value || "").trim()) === PASSWORD_HASH;
+// SHA-256 of the separate password asked before an email is sent.
+export const SEND_PASSWORD_HASH = "5cd3be394fdd163d72645c6ac47503c90a38085b4fd92b8d35020062d705568a";
+
+export const isSendPassword = (value) => sha256(String(value || "").trim()) === SEND_PASSWORD_HASH;
