@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { Plus, Check, ShoppingBasket, X, Users, Upload, FileText, Eye, ArrowRight, Send, MessageCircle, Save, History, Trash2, Mic } from "lucide-react";
-import { speakHe, stopSpeaking, primeSpeech, MIC_HELP } from "./speech.js";
+import { Plus, Check, ShoppingBasket, X, Users, Upload, FileText, Eye, ArrowRight, Send, MessageCircle, Save, History, Trash2, Mic, Volume2, Square } from "lucide-react";
+import { speakHe, stopSpeaking, primeSpeech, hasHebrewVoice, MIC_HELP, NO_HEBREW_VOICE } from "./speech.js";
 import { parseCommand, findProduct, applyOp, speakItem, prettyHe, normHe, VOICE_HELP } from "./voice.js";
 
 const CATEGORIES = [
@@ -1052,6 +1052,7 @@ export default function ShoppingList() {
   const [voiceSaid, setVoiceSaid] = useState("");
   const [sendPrompt, setSendPrompt] = useState(null); // "mail" | "whatsapp": waits for one tap
   const [voiceError, setVoiceError] = useState("");
+  const [readingList, setReadingList] = useState(false);
   const voiceOnRef = useRef(false);
   const recRef = useRef(null);
   const pendingRef = useRef(null);
@@ -1152,6 +1153,7 @@ export default function ShoppingList() {
       speak("הדפדפן הזה לא תומך בזיהוי דיבור. מומלץ לפתוח את האפליקציה בכרום באנדרואיד או בספארי באייפון.");
       return;
     }
+    if (hasHebrewVoice() === false) setVoiceError(NO_HEBREW_VOICE);
     voiceOnRef.current = true;
     setVoiceOn(true);
     missesRef.current = 0;
@@ -1335,9 +1337,37 @@ export default function ShoppingList() {
         setShowFinal(false);
         setActiveTab(cmd.category);
         const label = catInfo(cmd.category).label;
-        if (cmd.type === "goto_category") { reply(`${heard} עברתי למחלקת ${label}.`); return; }
+        if (cmd.type === "goto_category") {
+          const all = catalogFor(cmd.category);
+          const picked = all.filter((p) => alreadyInList(p.name)).length;
+          reply(`${heard} עברתי ללשונית ${label}. יש בה ${all.length} מוצרים${picked ? `, ${picked} מהם ברשימה` : ""}. כדי לשמוע אותם אמרו: מה יש כאן.`);
+          return;
+        }
         const list = catalogFor(cmd.category).map((p) => (alreadyInList(p.name) ? `${p.name}, נבחר` : p.name));
         reply(`${heard} במחלקת ${label} יש ${list.length} מוצרים: ${list.join(". ")}.`);
+        return;
+      }
+      case "goto_saved":
+        setShowFinal(false);
+        setShowSaved(true);
+        reply(`${heard} עברתי לרשימות הקודמות. ${savedLists.length ? `יש ${savedLists.length} רשימות שמורות.` : "עדיין אין רשימות שמורות."} כדי לחזור אמרו: חזור.`);
+        return;
+      case "goto_import":
+        setShowImport(true);
+        reply(`${heard} פתחתי את חלון הייבוא. אפשר להדביק בו רשימה כתובה או לבחור קובץ.`);
+        return;
+      case "goto_new_product":
+        setShowSaved(false);
+        setShowFinal(false);
+        setActiveTab("new");
+        setNewProdMsg("");
+        reply(`${heard} עברתי ללשונית מוצר חדש. אפשר גם פשוט לומר: תוסיף, ואת שם המוצר.`);
+        return;
+      case "read_here": {
+        if (showFinal) { reply(`${heard} ${listSummary()}`); return; }
+        if (activeTab === "new") { reply(`${heard} זו לשונית מוצר חדש. אפשר לומר: תוסיף, ואת שם המוצר.`); return; }
+        const list = catalogFor(activeTab).map((p) => (alreadyInList(p.name) ? `${p.name}, נבחר` : p.name));
+        reply(`${heard} במחלקת ${catInfo(activeTab).label} יש ${list.length} מוצרים: ${list.join(". ")}.`);
         return;
       }
       case "summary":
@@ -1348,7 +1378,8 @@ export default function ShoppingList() {
       case "back":
         setShowSaved(false);
         setShowFinal(false);
-        reply(`${heard} חזרתי לבחירת המוצרים, במחלקת ${catInfo(activeTab).label}.`);
+        setShowImport(false);
+        reply(`${heard} חזרתי לבחירת המוצרים, ללשונית ${activeTab === "new" ? "מוצר חדש" : catInfo(activeTab).label}.`);
         return;
       case "save":
         reply(`${heard} ${saveCurrentList() ? "הרשימה נשמרה." : "הרשימה ריקה, אין מה לשמור."}`);
@@ -1389,6 +1420,19 @@ export default function ShoppingList() {
       stopSpeaking();
     };
   }, []);
+
+  // Reads the whole list aloud, on demand; a second tap stops.
+  const toggleReadList = () => {
+    if (readingList) {
+      stopSpeaking();
+      setReadingList(false);
+      return;
+    }
+    if (hasHebrewVoice() === false) setVoiceError(NO_HEBREW_VOICE);
+    if (voiceOnRef.current) stopVoice();
+    setReadingList(true);
+    speakHe(listSummary(), () => setReadingList(false));
+  };
 
   // Every message the app shows is also said aloud. In voice mode the spoken reply already covers it.
   const sayShown = (text) => {
@@ -1545,6 +1589,8 @@ export default function ShoppingList() {
               <button
                 key={c.id}
                 className="tab-btn"
+                role="tab"
+                aria-selected={activeTab === c.id}
                 onClick={() => setActiveTab(c.id)}
                 style={{
                   ...styles.tabBtn,
@@ -1558,6 +1604,8 @@ export default function ShoppingList() {
             ))}
             <button
               className="tab-btn"
+              role="tab"
+              aria-selected={activeTab === "new"}
               onClick={() => { setActiveTab("new"); setNewProdMsg(""); }}
               style={{
                 ...styles.tabBtn,
@@ -1995,6 +2043,16 @@ export default function ShoppingList() {
       )}
 
       <button
+        onClick={toggleReadList}
+        className="read-btn"
+        style={{ ...styles.voiceBtn, ...styles.readBtn, background: readingList ? "#8C3931" : "#FFFFFF", color: readingList ? "#FFFFFF" : "#3E7C59" }}
+        aria-label={readingList ? "הפסק הקראה" : "הקרא את כל הרשימה"}
+        aria-pressed={readingList}
+      >
+        {readingList ? <Square size={22} /> : <Volume2 size={26} />}
+      </button>
+
+      <button
         onClick={toggleVoice}
         className="voice-btn"
         style={{ ...styles.voiceBtn, background: voiceOn ? (voiceState === "listening" ? "#C1554B" : "#8C3931") : "#3E7C59" }}
@@ -2009,7 +2067,7 @@ export default function ShoppingList() {
 }
 
 const styles = {
-  page: { minHeight: "100vh", background: "radial-gradient(ellipse at top, #F7F8EF 0%, #EFF1E3 55%, #E6E9D7 100%)", padding: "28px 14px 120px", fontFamily: "'Heebo', sans-serif", position: "relative", display: "flex", justifyContent: "center" },
+  page: { minHeight: "100vh", background: "radial-gradient(ellipse at top, #F7F8EF 0%, #EFF1E3 55%, #E6E9D7 100%)", padding: "28px 14px 180px", fontFamily: "'Heebo', sans-serif", position: "relative", display: "flex", justifyContent: "center" },
   texture: { position: "fixed", inset: 0, pointerEvents: "none", opacity: 0.5, backgroundImage: "radial-gradient(rgba(36,48,38,0.035) 1px, transparent 1px), radial-gradient(rgba(36,48,38,0.03) 1px, transparent 1px)", backgroundSize: "3px 3px, 7px 7px", backgroundPosition: "0 0, 2px 3px" },
   board: { width: "100%", maxWidth: 560, position: "relative", zIndex: 1 },
   header: { textAlign: "center", marginBottom: 6 },
@@ -2076,8 +2134,9 @@ const styles = {
   summaryTextarea: { width: "100%", padding: "10px 12px", borderRadius: 10, border: "1px solid #24302633", background: "#FFFFFF", color: "#4B5347", fontFamily: "'Heebo', sans-serif", fontSize: "0.85rem", resize: "vertical", lineHeight: 1.6 },
 
   voiceBtn: { position: "fixed", left: "max(16px, env(safe-area-inset-left, 0px))", bottom: "calc(18px + env(safe-area-inset-bottom, 0px))", width: 68, height: 68, borderRadius: "50%", border: "3px solid #FFFFFF", color: "#FFFFFF", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 6px 18px #00000040", cursor: "pointer", zIndex: 30, padding: 0 },
+  readBtn: { bottom: "calc(98px + env(safe-area-inset-bottom, 0px))", width: 56, height: 56, left: "calc(max(16px, env(safe-area-inset-left, 0px)) + 6px)", border: "2px solid #3E7C59" },
   voiceRing: { position: "absolute", inset: -8, borderRadius: "50%", border: "3px solid #C1554B", pointerEvents: "none" },
-  voicePanel: { position: "fixed", left: "max(16px, env(safe-area-inset-left, 0px))", right: "max(16px, env(safe-area-inset-right, 0px))", bottom: "calc(98px + env(safe-area-inset-bottom, 0px))", maxWidth: 520, margin: "0 auto", background: "#FFFFFFF2", border: "1px solid #24302633", borderRadius: 14, padding: "10px 14px", boxShadow: "0 6px 20px #00000026", zIndex: 29, display: "flex", flexDirection: "column", gap: 4, maxHeight: "30vh", overflowY: "auto", direction: "rtl", textAlign: "right" },
+  voicePanel: { position: "fixed", left: "max(16px, env(safe-area-inset-left, 0px))", right: "max(16px, env(safe-area-inset-right, 0px))", bottom: "calc(166px + env(safe-area-inset-bottom, 0px))", maxWidth: 520, margin: "0 auto", background: "#FFFFFFF2", border: "1px solid #24302633", borderRadius: 14, padding: "10px 14px", boxShadow: "0 6px 20px #00000026", zIndex: 29, display: "flex", flexDirection: "column", gap: 4, maxHeight: "30vh", overflowY: "auto", direction: "rtl", textAlign: "right" },
   voiceHeard: { color: "#7C8574", fontSize: "0.82rem" },
   voiceSaid: { color: "#243026", fontSize: "0.95rem", fontWeight: 500, lineHeight: 1.5 },
   tapAnywhere: { position: "fixed", inset: 0, zIndex: 40, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 16, background: "#3E7C59", color: "#FFFFFF", border: "none", textDecoration: "none", fontFamily: "'Heebo', sans-serif", cursor: "pointer", padding: 24, textAlign: "center" },
