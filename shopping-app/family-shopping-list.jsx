@@ -553,16 +553,19 @@ export default function ShoppingList() {
     }
     for (const name of before.keys()) if (!after.has(name)) lines.push(`${name} הוסר מהרשימה.`);
     if (!lines.length) return;
-    if (lines.length > 3) {
-      speakHe(after.size ? `הרשימה עודכנה. יש בה ${after.size} מוצרים.` : "הרשימה ריקה.");
-      return;
+    const text = lines.length > 3 ? (after.size ? `הרשימה עודכנה. יש בה ${after.size} מוצרים.` : "הרשימה ריקה.") : lines.join(" ");
+    // During voice control, pause the microphone so it doesn't hear the app, then listen again.
+    if (voiceOnRef.current) {
+      pauseListening();
+      reply(text);
+    } else {
+      speakHe(text);
     }
-    speakHe(lines.join(" "));
   };
 
-  const persist = async (next) => {
-    // In voice mode the spoken reply already says what changed.
-    if (!voiceOnRef.current) announceChanges(items, next);
+  // quiet: the change came from a voice command, whose spoken reply already says what changed.
+  const persist = async (next, { quiet = false } = {}) => {
+    if (!quiet) announceChanges(items, next);
     setItems(next);
     skipNextPoll.current = true;
     try {
@@ -1083,9 +1086,11 @@ export default function ShoppingList() {
   const missesRef = useRef(0);
   const voiceHandlerRef = useRef(null);
   const speakTokenRef = useRef(0);
+  const listenWatchRef = useRef(null);
 
   // Speaks a voice-mode reply and shows it in the panel, then calls after().
-  const speak = (text, after) => {
+  const speak = (raw, after) => {
+    const text = String(raw).trim();
     const token = ++speakTokenRef.current;
     setVoiceSaid(text);
     setVoiceState("speaking");
@@ -1100,8 +1105,13 @@ export default function ShoppingList() {
     voiceOnRef.current = false;
     setVoiceOn(false);
     pendingRef.current = null;
-    try { recRef.current && recRef.current.abort(); } catch (e) { /* already stopped */ }
+    clearTimeout(listenWatchRef.current);
+    const rec = recRef.current;
     recRef.current = null;
+    if (rec) {
+      rec.onresult = null; rec.onerror = null; rec.onend = null;
+      try { rec.abort(); } catch (e) { /* already stopped */ }
+    }
     if (bye) speak(bye);
     else {
       speakTokenRef.current++;
@@ -1110,8 +1120,26 @@ export default function ShoppingList() {
     }
   };
 
+  const detach = (rec) => {
+    rec.onresult = null;
+    rec.onerror = null;
+    rec.onend = null;
+  };
+
+  // Stops the microphone without ending voice control (used while the app talks).
+  const pauseListening = () => {
+    clearTimeout(listenWatchRef.current);
+    const rec = recRef.current;
+    recRef.current = null;
+    if (rec) {
+      detach(rec);
+      try { rec.abort(); } catch (e) { /* already stopped */ }
+    }
+  };
+
   const listen = () => {
     if (!voiceOnRef.current || !SpeechRec) return;
+    pauseListening();
     let rec;
     try {
       rec = new SpeechRec();
@@ -1120,6 +1148,16 @@ export default function ShoppingList() {
       return;
     }
     recRef.current = rec;
+    clearTimeout(listenWatchRef.current);
+    // Some phones start the microphone but never report anything; restart it if it stays silent.
+    listenWatchRef.current = setTimeout(() => {
+      if (recRef.current !== rec || !voiceOnRef.current) return;
+      detach(rec);
+      try { rec.abort(); } catch (e) { /* already stopped */ }
+      missesRef.current += 1;
+      if (missesRef.current >= 4) stopVoice("לא שמעתי כלום, אז הפסקתי להקשיב. כדי לדבר שוב לוחצים על כפתור המיקרופון.");
+      else listen();
+    }, 9000);
     rec.lang = "he-IL";
     rec.interimResults = false;
     rec.continuous = false;
@@ -1127,6 +1165,7 @@ export default function ShoppingList() {
     let got = false;
     rec.onresult = (e) => {
       got = true;
+      clearTimeout(listenWatchRef.current);
       missesRef.current = 0;
       const res = e.results[0];
       const alts = [];
@@ -1135,6 +1174,7 @@ export default function ShoppingList() {
     };
     rec.onerror = (e) => {
       got = true;
+      clearTimeout(listenWatchRef.current);
       if (e.error === "not-allowed" || e.error === "service-not-allowed") {
         setVoiceError(MIC_HELP);
         stopVoice(MIC_HELP);
@@ -1161,15 +1201,21 @@ export default function ShoppingList() {
   };
 
   const reply = (text, { keepListening = true } = {}) => {
+    pauseListening();
     speak(text, () => {
-      if (keepListening && voiceOnRef.current) listen();
+      // A short pause after the voice ends, so the phone has released the speaker before the mic starts.
+      if (keepListening && voiceOnRef.current) setTimeout(() => voiceOnRef.current && !recRef.current && listen(), 300);
     });
   };
 
   const toggleVoice = () => {
     setVoiceError("");
+    // While voice control is on, a tap means "listen to me now": it cuts the app's speech and opens the mic.
     if (voiceOnRef.current) {
-      stopVoice("השליטה הקולית כבויה.");
+      speakTokenRef.current++;
+      stopSpeaking();
+      missesRef.current = 0;
+      listen();
       return;
     }
     // The test link inside Claude has no microphone; only the real site does.
@@ -1277,7 +1323,8 @@ export default function ShoppingList() {
     const text = pick.text.trim();
     const cmd = pick.cmd;
     setVoiceHeard(text);
-    const heard = `שמעתי: ${text}.`;
+    // The reply leads with what was done (product and amount); what was heard shows on screen.
+    const heard = "";
     const pending = pendingRef.current;
     pendingRef.current = null;
     const said = [];
@@ -1296,7 +1343,7 @@ export default function ShoppingList() {
           cur = r.next;
           said.push(r.say);
           finishChunks(pending.type, pending.rest);
-          if (cur !== items) persist(cur);
+          if (cur !== items) persist(cur, { quiet: true });
           reply(`${heard} ${said.join(" ")}`);
           return;
         }
@@ -1308,14 +1355,14 @@ export default function ShoppingList() {
           cur = r.next;
           said.push(`${r.say} במחלקת ${catInfo(product.category).label}.`);
           finishChunks(pending.type, pending.rest);
-          persist(cur);
+          persist(cur, { quiet: true });
           reply(`${heard} ${said.join(" ")}`);
           return;
         }
         if (cmd.type === "no") {
           said.push(`בסדר, לא הוספתי את ${pending.name}.`);
           finishChunks(pending.type, pending.rest);
-          if (cur !== items) persist(cur);
+          if (cur !== items) persist(cur, { quiet: true });
           reply(`${heard} ${said.join(" ")}`);
           return;
         }
@@ -1341,7 +1388,7 @@ export default function ShoppingList() {
       case "inc":
       case "dec":
         finishChunks(cmd.type, cmd.items);
-        if (cur !== items) persist(cur);
+        if (cur !== items) persist(cur, { quiet: true });
         reply(`${heard} ${said.join(" ")}`);
         return;
       case "read_list":
@@ -1436,7 +1483,7 @@ export default function ShoppingList() {
         reply(`${heard} אין כרגע שאלה פתוחה. מה תרצו לעשות?`);
         return;
       default:
-        reply(`${heard} לא הבנתי מה לעשות. אפשר לומר: עזרה.`);
+        reply(`שמעתי: ${text}. לא הבנתי מה לעשות. אפשר לומר: עזרה.`);
     }
   };
   voiceHandlerRef.current = handleVoice;
@@ -2079,12 +2126,17 @@ export default function ShoppingList() {
         onClick={toggleVoice}
         className="voice-btn"
         style={{ ...styles.voiceBtn, background: voiceOn ? (voiceState === "listening" ? "#C1554B" : "#8C3931") : "#3E7C59" }}
-        aria-label={voiceOn ? "כבה שליטה קולית" : "הפעל שליטה קולית: לחצו ודברו"}
+        aria-label={voiceOn ? "דברו עכשיו" : "הפעל שליטה קולית: לחצו ודברו"}
         aria-pressed={voiceOn}
       >
         <Mic size={30} />
         {voiceOn && voiceState === "listening" && <span className="voice-ring" style={styles.voiceRing} />}
       </button>
+      {voiceOn && (
+        <button onClick={() => stopVoice("השליטה הקולית כבויה.")} className="chalk-btn" style={styles.voiceStopBtn} aria-label="כבה שליטה קולית">
+          <X size={18} /> סיום
+        </button>
+      )}
     </div>
   );
 }
@@ -2158,6 +2210,7 @@ const styles = {
 
   voiceBtn: { position: "fixed", left: "max(16px, env(safe-area-inset-left, 0px))", bottom: "calc(18px + env(safe-area-inset-bottom, 0px))", width: 68, height: 68, borderRadius: "50%", border: "3px solid #FFFFFF", color: "#FFFFFF", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 6px 18px #00000040", cursor: "pointer", zIndex: 30, padding: 0 },
   buildTag: { position: "fixed", right: "max(10px, env(safe-area-inset-right, 0px))", bottom: "calc(6px + env(safe-area-inset-bottom, 0px))", color: "#7C8574", fontSize: "0.68rem", zIndex: 5, pointerEvents: "none" },
+  voiceStopBtn: { position: "fixed", left: "calc(max(16px, env(safe-area-inset-left, 0px)) + 80px)", bottom: "calc(32px + env(safe-area-inset-bottom, 0px))", zIndex: 30, display: "flex", alignItems: "center", gap: 4, padding: "9px 14px", borderRadius: 20, border: "1px solid #24302633", background: "#FFFFFF", color: "#243026", fontFamily: "'Heebo', sans-serif", fontWeight: 600, fontSize: "0.9rem", boxShadow: "0 4px 12px #00000026", cursor: "pointer" },
   readBtn: { bottom: "calc(98px + env(safe-area-inset-bottom, 0px))", width: 56, height: 56, left: "calc(max(16px, env(safe-area-inset-left, 0px)) + 6px)", border: "2px solid #3E7C59" },
   voiceRing: { position: "absolute", inset: -8, borderRadius: "50%", border: "3px solid #C1554B", pointerEvents: "none" },
   voicePanel: { position: "fixed", left: "max(16px, env(safe-area-inset-left, 0px))", right: "max(16px, env(safe-area-inset-right, 0px))", bottom: "calc(98px + env(safe-area-inset-bottom, 0px))", maxWidth: 520, margin: "0 auto", background: "#FFFFFFF2", border: "1px solid #24302633", borderRadius: 14, padding: "10px 14px", boxShadow: "0 6px 20px #00000026", zIndex: 29, display: "flex", flexDirection: "column", gap: 4, maxHeight: "30vh", overflowY: "auto", direction: "rtl", textAlign: "right" },
