@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { NAME_KEY, greetingForHour } from "./family-shopping-list.jsx";
+import { speakHe } from "./speech.js";
 
 // SHA-256 of the family password. Only the hash is kept in the code, so the
 // password itself can't be read from the public repository.
@@ -100,9 +101,12 @@ export default function PasswordGate({ children }) {
         try { await window.storage.set(NAME_KEY, n, false); } catch {}
         setSavedName(n);
       }
+      const who = askName ? nameDraft.trim() : savedName;
+      speakHe(`${greetingForHour(new Date().getHours())}${who ? `, ${who}` : ""}. לשליטה קולית, לחצו על כפתור המיקרופון בפינה השמאלית התחתונה של המסך.`);
       setUnlocked(true);
     } else {
       setError("הסיסמה לא נכונה. נסו שוב.");
+      speakHe("הסיסמה לא נכונה. נסו שוב.");
       setValue("");
     }
   };

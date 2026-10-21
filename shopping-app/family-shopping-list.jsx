@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { Plus, Check, ShoppingBasket, X, Users, Upload, FileText, Eye, ArrowRight, Send, MessageCircle, Save, History, Trash2, Mic } from "lucide-react";
+import { speakHe, stopSpeaking, primeSpeech, MIC_HELP } from "./speech.js";
 import { parseCommand, findProduct, applyOp, speakItem, prettyHe, normHe, VOICE_HELP } from "./voice.js";
 
 const CATEGORIES = [
@@ -1050,6 +1051,7 @@ export default function ShoppingList() {
   const [voiceHeard, setVoiceHeard] = useState("");
   const [voiceSaid, setVoiceSaid] = useState("");
   const [sendPrompt, setSendPrompt] = useState(null); // "mail" | "whatsapp": waits for one tap
+  const [voiceError, setVoiceError] = useState("");
   const voiceOnRef = useRef(false);
   const recRef = useRef(null);
   const pendingRef = useRef(null);
@@ -1057,47 +1059,16 @@ export default function ShoppingList() {
   const voiceHandlerRef = useRef(null);
   const speakTokenRef = useRef(0);
 
-  const heVoice = () => {
-    try {
-      const vs = window.speechSynthesis.getVoices();
-      return vs.find((v) => /^(he|iw)/i.test(v.lang)) || null;
-    } catch (e) {
-      return null;
-    }
-  };
-
-  // Speaks sentence by sentence (long single utterances get cut off on some phones), then calls after().
+  // Speaks a voice-mode reply and shows it in the panel, then calls after().
   const speak = (text, after) => {
     const token = ++speakTokenRef.current;
     setVoiceSaid(text);
-    const done = () => {
+    setVoiceState("speaking");
+    speakHe(text, () => {
       if (token !== speakTokenRef.current) return;
       setVoiceState("idle");
       if (after) after();
-    };
-    if (!("speechSynthesis" in window)) { done(); return; }
-    try { window.speechSynthesis.cancel(); } catch (e) { /* nothing to cancel */ }
-    const parts = text.replace(/([.?!:])\s+/g, "$1\n").split("\n").filter((t) => t.trim());
-    if (!parts.length) { done(); return; }
-    setVoiceState("speaking");
-    const voice = heVoice();
-    let i = 0;
-    let guard = null;
-    const next = () => {
-      clearTimeout(guard);
-      if (token !== speakTokenRef.current) return;
-      if (i >= parts.length) { done(); return; }
-      const u = new SpeechSynthesisUtterance(parts[i++]);
-      u.lang = "he-IL";
-      if (voice) u.voice = voice;
-      u.rate = 1;
-      u.onend = next;
-      u.onerror = next;
-      // If the phone never reports the end of speech, move on anyway.
-      guard = setTimeout(next, 2500 + u.text.length * 110);
-      window.speechSynthesis.speak(u);
-    };
-    next();
+    });
   };
 
   const stopVoice = (bye) => {
@@ -1109,7 +1080,7 @@ export default function ShoppingList() {
     if (bye) speak(bye);
     else {
       speakTokenRef.current++;
-      try { window.speechSynthesis.cancel(); } catch (e) { /* nothing to cancel */ }
+      stopSpeaking();
       setVoiceState("idle");
     }
   };
@@ -1140,7 +1111,8 @@ export default function ShoppingList() {
     rec.onerror = (e) => {
       got = true;
       if (e.error === "not-allowed" || e.error === "service-not-allowed") {
-        stopVoice("אין הרשאה למיקרופון. צריך לאשר לדפדפן להשתמש במיקרופון, ואז ללחוץ שוב על כפתור הדיבור.");
+        setVoiceError(MIC_HELP);
+        stopVoice(MIC_HELP);
       } else if (e.error === "no-speech" || e.error === "aborted") {
         if (!voiceOnRef.current) return;
         missesRef.current += 1;
@@ -1170,11 +1142,13 @@ export default function ShoppingList() {
   };
 
   const toggleVoice = () => {
+    setVoiceError("");
     if (voiceOnRef.current) {
       stopVoice("השליטה הקולית כבויה.");
       return;
     }
     if (!SpeechRec) {
+      setVoiceError("הדפדפן הזה לא תומך בזיהוי דיבור. מומלץ לפתוח את האפליקציה בכרום באנדרואיד או בספארי באייפון.");
       speak("הדפדפן הזה לא תומך בזיהוי דיבור. מומלץ לפתוח את האפליקציה בכרום באנדרואיד או בספארי באייפון.");
       return;
     }
@@ -1407,11 +1381,36 @@ export default function ShoppingList() {
   };
   voiceHandlerRef.current = handleVoice;
 
-  useEffect(() => () => {
-    voiceOnRef.current = false;
-    try { recRef.current && recRef.current.abort(); } catch (e) { /* already stopped */ }
-    try { window.speechSynthesis.cancel(); } catch (e) { /* nothing to cancel */ }
+  useEffect(() => {
+    primeSpeech();
+    return () => {
+      voiceOnRef.current = false;
+      try { recRef.current && recRef.current.abort(); } catch (e) { /* already stopped */ }
+      stopSpeaking();
+    };
   }, []);
+
+  // Every message the app shows is also said aloud. In voice mode the spoken reply already covers it.
+  const sayShown = (text) => {
+    if (!text || voiceOnRef.current || voiceState === "speaking") return;
+    speakHe(text);
+  };
+  useEffect(() => { sayShown(saveMsg); }, [saveMsg]);
+  useEffect(() => { sayShown(copyMsg); }, [copyMsg]);
+  useEffect(() => { sayShown(newProdMsg); }, [newProdMsg]);
+  useEffect(() => {
+    if (mailFailed) sayShown("תיבת המייל לא נפתחה. אפשר ללחוץ על הכפתור העתק את תוכן המייל, ולהדביק בתיבת המייל.");
+  }, [mailFailed]);
+  useEffect(() => {
+    if (mailCopied && !mailFailed) setTimeout(() => sayShown("הרשימה גם הועתקה, מיושרת לימין."), 300);
+  }, [mailCopied]);
+  useEffect(() => {
+    if (showLeavePrompt) sayShown("יצאת מהאפליקציה והרשימה לא נשמרה. לשמור אותה ברשימות הקודמות? יש כפתור שמור וכפתור לא עכשיו.");
+  }, [showLeavePrompt]);
+  useEffect(() => {
+    if (importPreview && importPreview.length === 0) sayShown("לא זוהו מוצרים חדשים. ייתכן שכולם כבר ברשימה.");
+    else if (importPreview && importPreview.length) sayShown(`זוהו ${importPreview.length} מוצרים. אפשר לסמן מה להוסיף וללחוץ הוסף.`);
+  }, [importPreview]);
 
   const remaining = items.filter((i) => !i.done).length;
   const doneCount = items.length - remaining;
@@ -1979,7 +1978,16 @@ export default function ShoppingList() {
         )
       )}
 
-      {(voiceOn || voiceState === "speaking") && (voiceHeard || voiceSaid) && (
+      {voiceError && (
+        <div style={{ ...styles.voicePanel, borderColor: "#C1554B88" }} role="alert">
+          <div style={styles.voiceSaid}>{voiceError}</div>
+          <button onClick={() => { setVoiceError(""); stopSpeaking(); }} className="chalk-btn" style={{ ...styles.finalTopBtn, alignSelf: "flex-start", marginTop: 6 }}>
+            סגור
+          </button>
+        </div>
+      )}
+
+      {!voiceError && (voiceOn || voiceState === "speaking") && (voiceHeard || voiceSaid) && (
         <div style={styles.voicePanel} aria-hidden="true">
           {voiceHeard && <div style={styles.voiceHeard}>שמעתי: {voiceHeard}</div>}
           {voiceSaid && <div style={styles.voiceSaid}>{voiceSaid.replace(/^שמעתי: .*?\.\s*/, "")}</div>}
