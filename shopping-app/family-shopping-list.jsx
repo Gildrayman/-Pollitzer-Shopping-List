@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { Plus, Check, ShoppingBasket, X, Users, Upload, FileText, Eye, ArrowRight, Send, MessageCircle, Save, History, Trash2, Mic, Volume2, Square } from "lucide-react";
+import { Plus, Check, ShoppingBasket, X, Users, Upload, FileText, Eye, ArrowRight, Send, MessageCircle, Save, History, Trash2, Mic } from "lucide-react";
 import { speakHe, stopSpeaking, primeSpeech, onSpeechStatus, MIC_HELP } from "./speech.js";
 import { parseCommand, findProduct, applyOp, speakItem, prettyHe, normHe, VOICE_HELP } from "./voice.js";
 
@@ -541,7 +541,28 @@ export default function ShoppingList() {
     return () => clearInterval(t);
   }, [refreshList]);
 
+  // Says aloud what a tap just changed: the product and its new amount.
+  const announceChanges = (prev, next) => {
+    const active = (arr) => new Map(arr.filter((it) => !it.done).map((it) => [it.name.trim(), it]));
+    const before = active(prev);
+    const after = active(next);
+    const lines = [];
+    for (const [name, it] of after) {
+      const old = before.get(name);
+      if (!old || old.qty !== it.qty || (old.kg || 0) !== (it.kg || 0)) lines.push(`${speakItem(it)}.`);
+    }
+    for (const name of before.keys()) if (!after.has(name)) lines.push(`${name} הוסר מהרשימה.`);
+    if (!lines.length) return;
+    if (lines.length > 3) {
+      speakHe(after.size ? `הרשימה עודכנה. יש בה ${after.size} מוצרים.` : "הרשימה ריקה.");
+      return;
+    }
+    speakHe(lines.join(" "));
+  };
+
   const persist = async (next) => {
+    // In voice mode the spoken reply already says what changed.
+    if (!voiceOnRef.current) announceChanges(items, next);
     setItems(next);
     skipNextPoll.current = true;
     try {
@@ -1054,7 +1075,6 @@ export default function ShoppingList() {
   const [voiceSaid, setVoiceSaid] = useState("");
   const [sendPrompt, setSendPrompt] = useState(null); // "mail" | "whatsapp": waits for one tap
   const [voiceError, setVoiceError] = useState("");
-  const [readingList, setReadingList] = useState(false);
   const [speechInfo, setSpeechInfo] = useState({ engine: "google", state: "שקט", error: "" });
   useEffect(() => onSpeechStatus(setSpeechInfo), []);
   const voiceOnRef = useRef(false);
@@ -1429,21 +1449,6 @@ export default function ShoppingList() {
       stopSpeaking();
     };
   }, []);
-
-  // Reads the whole list aloud, on demand; a second tap stops.
-  const toggleReadList = () => {
-    if (readingList) {
-      stopSpeaking();
-      setReadingList(false);
-      return;
-    }
-    if (voiceOnRef.current) stopVoice();
-    setReadingList(true);
-    setVoiceHeard("");
-    const text = listSummary();
-    setVoiceSaid(text);
-    speakHe(text, () => setReadingList(false));
-  };
 
   // Every message the app shows is also said aloud. In voice mode the spoken reply already covers it.
   const sayShown = (text) => {
@@ -2055,7 +2060,7 @@ export default function ShoppingList() {
         </div>
       )}
 
-      {!voiceError && (voiceOn || voiceState === "speaking" || readingList) && (voiceHeard || voiceSaid) && (
+      {!voiceError && (voiceOn || voiceState === "speaking") && (voiceHeard || voiceSaid) && (
         <div style={styles.voicePanel} aria-hidden="true">
           {voiceHeard && voiceOn && <div style={styles.voiceHeard}>שמעתי: {voiceHeard}</div>}
           {voiceSaid && <div style={styles.voiceSaid}>{voiceSaid.replace(/^שמעתי: .*?\.\s*/, "")}</div>}
@@ -2069,16 +2074,6 @@ export default function ShoppingList() {
       )}
 
       <div style={styles.buildTag} aria-hidden="true">גרסה {APP_BUILD}</div>
-
-      <button
-        onClick={toggleReadList}
-        className="read-btn"
-        style={{ ...styles.voiceBtn, ...styles.readBtn, background: readingList ? "#8C3931" : "#FFFFFF", color: readingList ? "#FFFFFF" : "#3E7C59" }}
-        aria-label={readingList ? "הפסק הקראה" : "הקרא את כל הרשימה"}
-        aria-pressed={readingList}
-      >
-        {readingList ? <Square size={22} /> : <Volume2 size={26} />}
-      </button>
 
       <button
         onClick={toggleVoice}
@@ -2095,7 +2090,7 @@ export default function ShoppingList() {
 }
 
 const styles = {
-  page: { minHeight: "100vh", background: "radial-gradient(ellipse at top, #F7F8EF 0%, #EFF1E3 55%, #E6E9D7 100%)", padding: "28px 14px 180px", fontFamily: "'Heebo', sans-serif", position: "relative", display: "flex", justifyContent: "center" },
+  page: { minHeight: "100vh", background: "radial-gradient(ellipse at top, #F7F8EF 0%, #EFF1E3 55%, #E6E9D7 100%)", padding: "28px 14px 120px", fontFamily: "'Heebo', sans-serif", position: "relative", display: "flex", justifyContent: "center" },
   texture: { position: "fixed", inset: 0, pointerEvents: "none", opacity: 0.5, backgroundImage: "radial-gradient(rgba(36,48,38,0.035) 1px, transparent 1px), radial-gradient(rgba(36,48,38,0.03) 1px, transparent 1px)", backgroundSize: "3px 3px, 7px 7px", backgroundPosition: "0 0, 2px 3px" },
   board: { width: "100%", maxWidth: 560, position: "relative", zIndex: 1 },
   header: { textAlign: "center", marginBottom: 6 },
@@ -2165,7 +2160,7 @@ const styles = {
   buildTag: { position: "fixed", right: "max(10px, env(safe-area-inset-right, 0px))", bottom: "calc(6px + env(safe-area-inset-bottom, 0px))", color: "#7C8574", fontSize: "0.68rem", zIndex: 5, pointerEvents: "none" },
   readBtn: { bottom: "calc(98px + env(safe-area-inset-bottom, 0px))", width: 56, height: 56, left: "calc(max(16px, env(safe-area-inset-left, 0px)) + 6px)", border: "2px solid #3E7C59" },
   voiceRing: { position: "absolute", inset: -8, borderRadius: "50%", border: "3px solid #C1554B", pointerEvents: "none" },
-  voicePanel: { position: "fixed", left: "max(16px, env(safe-area-inset-left, 0px))", right: "max(16px, env(safe-area-inset-right, 0px))", bottom: "calc(166px + env(safe-area-inset-bottom, 0px))", maxWidth: 520, margin: "0 auto", background: "#FFFFFFF2", border: "1px solid #24302633", borderRadius: 14, padding: "10px 14px", boxShadow: "0 6px 20px #00000026", zIndex: 29, display: "flex", flexDirection: "column", gap: 4, maxHeight: "30vh", overflowY: "auto", direction: "rtl", textAlign: "right" },
+  voicePanel: { position: "fixed", left: "max(16px, env(safe-area-inset-left, 0px))", right: "max(16px, env(safe-area-inset-right, 0px))", bottom: "calc(98px + env(safe-area-inset-bottom, 0px))", maxWidth: 520, margin: "0 auto", background: "#FFFFFFF2", border: "1px solid #24302633", borderRadius: 14, padding: "10px 14px", boxShadow: "0 6px 20px #00000026", zIndex: 29, display: "flex", flexDirection: "column", gap: 4, maxHeight: "30vh", overflowY: "auto", direction: "rtl", textAlign: "right" },
   voiceHeard: { color: "#7C8574", fontSize: "0.82rem" },
   voiceSaid: { color: "#243026", fontSize: "0.95rem", fontWeight: 500, lineHeight: 1.5, whiteSpace: "pre-line" },
   voiceStatus: { color: "#7C8574", fontSize: "0.72rem", marginTop: 4, borderTop: "1px solid #24302614", paddingTop: 4 },
