@@ -407,6 +407,8 @@ function getCatalogNote(itemName) {
   return custom && custom.note ? custom.note : "";
 }
 
+const APP_BUILD = typeof __BUILD__ !== "undefined" ? __BUILD__ : "dev";
+
 export default function ShoppingList() {
   const [items, setItems] = useState([]);
   const [loaded, setLoaded] = useState(false);
@@ -1148,6 +1150,12 @@ export default function ShoppingList() {
     setVoiceError("");
     if (voiceOnRef.current) {
       stopVoice("השליטה הקולית כבויה.");
+      return;
+    }
+    // The test link inside Claude has no microphone; only the real site does.
+    if (!/github\.io$|^localhost$|^127\.0\.0\.1$/.test(location.hostname)) {
+      setVoiceError("NOT_LIVE");
+      speak("כאן, בקישור הבדיקה, אין גישה למיקרופון ולרמקול. כדי לדבר עם האפליקציה צריך לפתוח את האתר החי. יש על המסך כפתור שפותח אותו.");
       return;
     }
     if (!SpeechRec) {
@@ -2031,7 +2039,16 @@ export default function ShoppingList() {
 
       {voiceError && (
         <div style={{ ...styles.voicePanel, borderColor: "#C1554B88" }} role="alert">
-          <div style={styles.voiceSaid}>{voiceError}</div>
+          {voiceError === "NOT_LIVE" ? (
+            <>
+              <div style={styles.voiceSaid}>כאן, בקישור הבדיקה, אין גישה למיקרופון ולרמקול. הדיבור עובד רק באתר החי.</div>
+              <a href="https://gildrayman.github.io/-Pollitzer-Shopping-List/" target="_blank" rel="noopener noreferrer" className="chalk-btn" style={{ ...styles.finalTopBtn, ...styles.finalSendBtn, alignSelf: "flex-start", marginTop: 6, textDecoration: "none" }}>
+                פתח את האתר החי
+              </a>
+            </>
+          ) : (
+            <div style={styles.voiceSaid}>{voiceError}</div>
+          )}
           <button onClick={() => { setVoiceError(""); stopSpeaking(); }} className="chalk-btn" style={{ ...styles.finalTopBtn, alignSelf: "flex-start", marginTop: 6 }}>
             סגור
           </button>
@@ -2046,9 +2063,12 @@ export default function ShoppingList() {
             {voiceState === "listening" ? "🎙️ מקשיב" : speechInfo.state === "מדבר" ? "🔊 מדבר" : "⏸"}
             {" · "}קול: {speechInfo.engine === "google" ? "Google" : "של הטלפון"}
             {speechInfo.error ? ` · ${speechInfo.error}` : ""}
+            {` · זיהוי דיבור: ${SpeechRec ? "יש" : "אין"} · גרסה ${APP_BUILD}`}
           </div>
         </div>
       )}
+
+      <div style={styles.buildTag} aria-hidden="true">גרסה {APP_BUILD}</div>
 
       <button
         onClick={toggleReadList}
@@ -2142,6 +2162,7 @@ const styles = {
   summaryTextarea: { width: "100%", padding: "10px 12px", borderRadius: 10, border: "1px solid #24302633", background: "#FFFFFF", color: "#4B5347", fontFamily: "'Heebo', sans-serif", fontSize: "0.85rem", resize: "vertical", lineHeight: 1.6 },
 
   voiceBtn: { position: "fixed", left: "max(16px, env(safe-area-inset-left, 0px))", bottom: "calc(18px + env(safe-area-inset-bottom, 0px))", width: 68, height: 68, borderRadius: "50%", border: "3px solid #FFFFFF", color: "#FFFFFF", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 6px 18px #00000040", cursor: "pointer", zIndex: 30, padding: 0 },
+  buildTag: { position: "fixed", right: "max(10px, env(safe-area-inset-right, 0px))", bottom: "calc(6px + env(safe-area-inset-bottom, 0px))", color: "#7C8574", fontSize: "0.68rem", zIndex: 5, pointerEvents: "none" },
   readBtn: { bottom: "calc(98px + env(safe-area-inset-bottom, 0px))", width: 56, height: 56, left: "calc(max(16px, env(safe-area-inset-left, 0px)) + 6px)", border: "2px solid #3E7C59" },
   voiceRing: { position: "absolute", inset: -8, borderRadius: "50%", border: "3px solid #C1554B", pointerEvents: "none" },
   voicePanel: { position: "fixed", left: "max(16px, env(safe-area-inset-left, 0px))", right: "max(16px, env(safe-area-inset-right, 0px))", bottom: "calc(166px + env(safe-area-inset-bottom, 0px))", maxWidth: 520, margin: "0 auto", background: "#FFFFFFF2", border: "1px solid #24302633", borderRadius: 14, padding: "10px 14px", boxShadow: "0 6px 20px #00000026", zIndex: 29, display: "flex", flexDirection: "column", gap: 4, maxHeight: "30vh", overflowY: "auto", direction: "rtl", textAlign: "right" },
