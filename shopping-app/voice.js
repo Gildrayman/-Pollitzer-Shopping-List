@@ -294,10 +294,11 @@ const qtyOf = (it) => {
   return Number.isFinite(q) && q > 0 ? q : 1;
 };
 
-// Says "3 עגבניות שרי" / "2 קילו שוק הודו" / "שוק הודו, 2 קילו ו-3 יחידות".
+// Says "3 עגבניות שרי" / "2 קילו שוק הודו". Like the written list, meat and fish
+// say one amount: the units when there are more units than kilos, otherwise the kilos.
 export function speakItem(it) {
   const q = qtyOf(it);
-  if (it.kg > 0) return q > 1 ? `${it.name}, ${it.kg} קילו, ${q} יחידות` : `${it.kg} קילו ${it.name}`;
+  if (it.kg > 0 && q <= it.kg) return `${it.kg} קילו ${it.name}`;
   return q > 1 ? `${q} ${it.name}` : `${it.name}, יחידה אחת`;
 }
 

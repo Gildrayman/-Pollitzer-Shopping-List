@@ -285,13 +285,13 @@ function WithUnitsLabel({ show, children }) {
 }
 
 // One line of the list as it is sent and saved: "2 × שם (הערה)", or with a weight
-// "2 קילו שם (הערה)" (and "3 × 2 קילו שם" when both are set).
+// "2 קילו שם (הערה)". Meat and fish show one amount only, as the family asked:
+// more units than kilos → the units alone; otherwise → the kilos alone.
 // The email leaves out the "×" ("2 שם"), as the family asked (plain = true).
 function formatListLine({ qty, kg, name, note }, plain = false) {
   const times = plain ? " " : " × ";
-  const weight = kg > 0 ? `${kg} קילו ` : "";
-  const count = kg > 0 ? (qty > 1 ? `${qty}${times}` : "") : `${qty}${times}`;
-  return `${count}${weight}${name}${note ? ` (${note})` : ""}`;
+  const amount = kg > 0 && qty <= kg ? `${kg} קילו ` : `${qty}${times}`;
+  return `${amount}${name}${note ? ` (${note})` : ""}`;
 }
 
 function stripWhatsAppPrefix(line) {
