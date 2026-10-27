@@ -48,6 +48,6 @@ export function sha256(text) {
 }
 
 // SHA-256 of the separate password asked before an email is sent.
-export const SEND_PASSWORD_HASH = "5cd3be394fdd163d72645c6ac47503c90a38085b4fd92b8d35020062d705568a";
+export const SEND_PASSWORD_HASH = "4d3c81d0207371f8835c36ac47b14d3a7582a537acc3095b0ec88e8aa74dfd2e";
 
 export const isSendPassword = (value) => sha256(String(value || "").trim()) === SEND_PASSWORD_HASH;
