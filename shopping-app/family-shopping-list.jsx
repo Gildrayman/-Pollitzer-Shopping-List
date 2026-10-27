@@ -931,6 +931,18 @@ export default function ShoppingList() {
     setTimeout(() => setSaveMsg(""), 2500);
   };
 
+  // After a list is sent by mail it goes to "רשימות קודמות" and the choices start over.
+  // Kept in a ref so the check that runs a moment after sending uses the current list.
+  const archiveAfterSendRef = useRef(null);
+  archiveAfterSendRef.current = () => {
+    if (finalItems.length === 0) return;
+    startNewList();
+    setSaveMsg("נשלח ונשמר ✓");
+    setTimeout(() => setSaveMsg(""), 4000);
+    setRemoteMsg("הרשימה נשלחה ונשמרה ברשימות הקודמות. אפשר להתחיל רשימה חדשה.");
+    setTimeout(() => setRemoteMsg(""), 5000);
+  };
+
   // --- Offer to save before leaving / closing the app ---
   const [showLeavePrompt, setShowLeavePrompt] = useState(false);
   const listSig = (arr) => arr.map((x) => `${x.name.trim()}|${x.qty}|${x.kg || 0}`).join(";");
@@ -1059,7 +1071,10 @@ export default function ShoppingList() {
     setTimeout(() => {
       window.removeEventListener("blur", onLeave);
       document.removeEventListener("visibilitychange", onLeave);
-      if (!left) setMailFailed(true);
+      // The mail app opened: the list is sent, so archive it and clear the choices.
+      // If it didn't open, the list stays so it can still be copied.
+      if (left) archiveAfterSendRef.current();
+      else setMailFailed(true);
     }, 1500);
   };
 
