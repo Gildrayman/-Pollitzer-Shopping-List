@@ -3,9 +3,23 @@ import { createRoot } from "react-dom/client";
 import PasswordGate from "./password-gate.jsx";
 import ShoppingList from "./family-shopping-list.jsx";
 import { registerServiceWorker, startBadges } from "./badge.js";
+import { flushNow } from "./sync.js";
 
 registerServiceWorker();
 startBadges();
+
+// Closing the app, switching away or turning the screen off: finish any typing
+// (a quantity, a note or a name saves when its field loses focus) and send the
+// latest list to the family copy. Each change is already saved on the phone.
+const saveBeforeLeaving = () => {
+  const el = document.activeElement;
+  if (el && el !== document.body && typeof el.blur === "function") el.blur();
+  flushNow();
+};
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") saveBeforeLeaving();
+});
+window.addEventListener("pagehide", saveBeforeLeaving);
 
 // Phones keep an old copy of the site for a while after an update. Ask the server for the
 // newest page, and if its build differs from the one running, load it once.

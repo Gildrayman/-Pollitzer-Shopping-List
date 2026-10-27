@@ -54,8 +54,10 @@ const notify = (keys, by) => {
 const baseUrl = () => `${FIREBASE_DB_URL.replace(/\/+$/, "")}/${familyPath}`;
 
 // Sends every change not yet confirmed by the server, in one request.
-async function flush() {
-  if (!familyPath || flushing) return;
+// leaving: the app is being closed or hidden; the request is sent even if
+// another one is on its way, and the browser finishes it after the page is gone.
+async function flush(leaving = false) {
+  if (!familyPath || (flushing && !leaving)) return;
   const pending = readPending();
   const keys = Object.keys(pending);
   if (!keys.length) return;
@@ -64,6 +66,7 @@ async function flush() {
   try {
     const res = await fetch(`${baseUrl()}.json`, {
       method: "PATCH",
+      keepalive: leaving,
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ...pending, [LAST_CHANGE]: { device: deviceId, name, at: Date.now() } }),
     });
@@ -160,6 +163,9 @@ export function startSync(password) {
 }
 
 export const hasSyncKey = () => !!ls.get(SYNC_KEY);
+
+// Everything is already on the phone; this pushes what the family copy hasn't got yet.
+export const flushNow = () => flush(true);
 
 if (typeof window !== "undefined") {
   window.addEventListener("online", () => { if (familyPath) { connect(); flush(); } });
