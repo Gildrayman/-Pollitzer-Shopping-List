@@ -19,6 +19,12 @@ const CATEGORIES = [
 
 const catInfo = (id) => CATEGORIES.find((c) => c.id === id) || CATEGORIES[CATEGORIES.length - 1];
 
+// Every list is ordered by department (in the tabs' order), then alphabetically (א-ב) inside it.
+const byName = (a, b) => String(a.name || "").trim().localeCompare(String(b.name || "").trim(), "he", { sensitivity: "base", numeric: true });
+const deptIndex = (cat) => { const i = CATEGORIES.findIndex((c) => c.id === cat); return i < 0 ? CATEGORIES.length : i; };
+const byDeptThenName = (a, b) => deptIndex(a.category) - deptIndex(b.category) || byName(a, b);
+const sortByDept = (arr) => arr.slice().sort(byDeptThenName);
+
 // Catalog curated from the family's own WhatsApp group ("קניות משפחת דריימן - פוליצר") —
 // only products that actually appear there, with their notes/descriptions from the messages.
 const COMMON_ITEMS = {
@@ -642,10 +648,7 @@ export default function ShoppingList() {
   };
 
   useEffect(() => {
-    const lines = items
-      .filter((it) => !it.done)
-      .slice()
-      .reverse()
+    const lines = sortByDept(items.filter((it) => !it.done))
       .map((it) => formatListLine({ qty: unitsOf(it), kg: kgOf(it), name: it.name, note: getCatalogNote(it.name) }));
     const text = lines.join("\n");
     setSummaryText(text);
@@ -782,14 +785,14 @@ export default function ShoppingList() {
     setFinalCustomText("");
   };
 
-  const finalItems = items.filter((it) => !it.done).slice().reverse();
+  const finalItems = sortByDept(items.filter((it) => !it.done));
 
   // Built-in catalog for a category plus the products the family added to it.
   // origName stays the catalog's own name, so a renamed product can be renamed again.
   const catalogFor = (cat) => [
     ...(COMMON_ITEMS[cat] || []).filter((p) => !hiddenProducts.includes(p.name.trim())),
     ...customProducts.filter((p) => p.category === cat).map((p) => ({ ...p, custom: true })),
-  ].map((p) => ({ ...p, origName: p.name, name: displayName(p.name) }));
+  ].map((p) => ({ ...p, origName: p.name, name: displayName(p.name) })).sort(byName);
 
   // Renames a product everywhere: in the catalog, on the current list, and its note follows it.
   const renameProduct = async (currentName, newName) => {
@@ -1163,7 +1166,7 @@ export default function ShoppingList() {
       seen.add(key);
       parsed.push({ name, qty, category: match ? match.category : guessCategory(name), include: true });
     }
-    setImportPreview(parsed);
+    setImportPreview(sortByDept(parsed));
   };
 
   const toggleImportInclude = (idx) =>
@@ -1827,7 +1830,7 @@ export default function ShoppingList() {
                   </button>
                   {open && (
                     <div style={styles.savedBody}>
-                      {l.items.map((s, i) => (
+                      {sortByDept(l.items).map((s, i) => (
                         <div key={i} style={styles.savedLine}>
                           {formatListLine({ qty: s.qty, kg: s.kg || 0, name: s.name, note: s.note })}
                         </div>
