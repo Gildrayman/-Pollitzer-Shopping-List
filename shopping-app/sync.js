@@ -99,6 +99,49 @@ function applyRemote(entries, by) {
   notify(changed, by);
 }
 
+// The first time a phone joins the family copy, what it chose before is added to
+// the family's list instead of being replaced by it, so no earlier choice is lost.
+const MERGED_KEY = "drayman-sync-merged";
+const parse = (v) => { try { return JSON.parse(v); } catch { return null; } };
+const num = (v) => { const n = parseInt(v, 10); return Number.isFinite(n) ? n : 0; };
+const MERGERS = {
+  "family-shopping-list-items": (server, local) => {
+    const out = server.map((it) => ({ ...it }));
+    for (const it of local) {
+      const same = out.find((x) => x.name.trim() === it.name.trim() && !!x.done === !!it.done);
+      if (!same) out.push(it);
+      else {
+        same.qty = String(Math.max(num(same.qty), num(it.qty)) || same.qty);
+        if (it.kg || same.kg) same.kg = Math.max(same.kg || 0, it.kg || 0);
+      }
+    }
+    return out;
+  },
+  "family-shopping-list-custom-products": (server, local) =>
+    [...server, ...local.filter((p) => !server.some((x) => x.name.trim() === p.name.trim()))],
+  "family-shopping-list-saved-lists": (server, local) =>
+    [...server, ...local.filter((l) => !server.some((x) => x.id === l.id))],
+  "family-shopping-list-hidden-products": (server, local) => [...new Set([...server, ...local])],
+  "family-shopping-list-note-overrides": (server, local) => ({ ...local, ...server }),
+  "family-shopping-list-name-overrides": (server, local) => ({ ...local, ...server }),
+};
+
+function mergeOnce(entries, pending) {
+  const done = parse(ls.get(MERGED_KEY)) || {};
+  if (done[familyPath]) return;
+  for (const [key, merge] of Object.entries(MERGERS)) {
+    if (key in pending) continue;
+    const server = parse(entries[key]);
+    const local = parse(ls.get(key));
+    if (!server || !local || entries[key] === ls.get(key)) continue;
+    if (Array.isArray(server) !== Array.isArray(local)) continue;
+    const merged = JSON.stringify(merge(server, local));
+    if (merged !== entries[key]) { ls.set(key, merged); pending[key] = merged; }
+  }
+  done[familyPath] = Date.now();
+  ls.set(MERGED_KEY, JSON.stringify(done));
+}
+
 function connect() {
   if (source) source.close();
   setStatus("connecting");
@@ -121,7 +164,10 @@ function connect() {
         for (const k of localSharedKeys()) {
           if (!(k in entries) && ls.get(k) !== null && !(k in pending)) pending[k] = ls.get(k);
         }
+        mergeOnce(entries, pending);
         writePending(pending);
+        // Merged keys are now pending, so applyRemote leaves them; tell the app to reload them.
+        notify(Object.keys(pending), null);
       }
       applyRemote(entries, by);
     } else {
