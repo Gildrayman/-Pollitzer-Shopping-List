@@ -21,6 +21,13 @@ fs.writeFileSync(out, `<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="app-build" content="${build}">
 <meta http-equiv="Cache-Control" content="no-cache">
+<meta name="theme-color" content="#3E7C59">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="קניות">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" href="icon-192.png">
 <title>קניות משפחת דריימן</title>
 <style>html,body{margin:0}</style>
 </head>

@@ -2,6 +2,10 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import PasswordGate from "./password-gate.jsx";
 import ShoppingList from "./family-shopping-list.jsx";
+import { registerServiceWorker, startBadges } from "./badge.js";
+
+registerServiceWorker();
+startBadges();
 
 // Phones keep an old copy of the site for a while after an update. Ask the server for the
 // newest page, and if its build differs from the one running, load it once.

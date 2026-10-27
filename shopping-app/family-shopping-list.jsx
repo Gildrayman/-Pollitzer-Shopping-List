@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import { Plus, Check, ShoppingBasket, X, Users, Upload, FileText, Eye, ArrowRight, Send, MessageCircle, Save, History, Trash2, Mic } from "lucide-react";
 import { isSendPassword } from "./auth.js";
 import { getSyncStatus } from "./sync.js";
+import { isInstalled, isIOS, notifyPermission, badgePromptDone, markBadgePromptDone, enableBadge } from "./badge.js";
 import { speakHe, stopSpeaking, primeSpeech, onSpeechStatus, micTone, MIC_HELP } from "./speech.js";
 import { parseCommand, findProduct, findCategory, applyOp, speakItem, prettyHe, normHe, VOICE_HELP } from "./voice.js";
 
@@ -530,6 +531,42 @@ export default function ShoppingList() {
       // no removed products yet
     }
   }, []);
+
+  // Home-screen badge: first suggest installing the app, then ask permission for the red mark.
+  const [badgeStep, setBadgeStep] = useState(() => {
+    try {
+      if (badgePromptDone()) return null;
+      if (!isInstalled()) return localStorage.getItem("drayman-install-tip-done") ? null : "install";
+      return notifyPermission() === "default" ? "enable" : null;
+    } catch { return null; }
+  });
+  const installEvt = useRef(null);
+  const [canInstall, setCanInstall] = useState(false);
+  useEffect(() => {
+    const onPrompt = (e) => { e.preventDefault(); installEvt.current = e; setCanInstall(true); };
+    window.addEventListener("beforeinstallprompt", onPrompt);
+    return () => window.removeEventListener("beforeinstallprompt", onPrompt);
+  }, []);
+  const closeInstallTip = () => {
+    try { localStorage.setItem("drayman-install-tip-done", "1"); } catch {}
+    setBadgeStep(null);
+  };
+  const installNow = async () => {
+    const e = installEvt.current;
+    if (!e) return;
+    e.prompt();
+    try { await e.userChoice; } catch {}
+    installEvt.current = null;
+    setCanInstall(false);
+    closeInstallTip();
+  };
+  const turnOnBadge = async () => {
+    const res = await enableBadge();
+    setBadgeStep(null);
+    setSaveMsg(res === "granted" ? "הסימון על האייקון הופעל ✓" : "הסימון לא הופעל. אפשר להפעיל בהגדרות הטלפון.");
+    setTimeout(() => setSaveMsg(""), 3000);
+  };
+  const skipBadge = () => { markBadgePromptDone(); setBadgeStep(null); };
 
   // Live updates: another family member changed something, show it right away.
   const [syncStatus, setSyncStatus] = useState(getSyncStatus());
@@ -1826,6 +1863,27 @@ export default function ShoppingList() {
             </span>
           </div>
           {remoteMsg && <div role="status" style={styles.remoteMsg}>{remoteMsg}</div>}
+          {badgeStep === "enable" && (
+            <div style={styles.badgeCard}>
+              <span>רוצים עיגול אדום על האייקון כשמישהו אחר במשפחה משנה את הרשימה?</span>
+              <div style={styles.badgeBtns}>
+                <button onClick={turnOnBadge} style={styles.badgeYes}>הפעלה</button>
+                <button onClick={skipBadge} style={styles.badgeNo}>לא תודה</button>
+              </div>
+            </div>
+          )}
+          {badgeStep === "install" && (
+            <div style={styles.badgeCard}>
+              <span>
+                כדי לקבל עיגול אדום על האייקון כשמישהו אחר משנה את הרשימה, מוסיפים את האפליקציה למסך הבית
+                {canInstall ? "." : isIOS() ? ": בספארי לוחצים על כפתור השיתוף (ריבוע עם חץ), ואז \"הוספה למסך הבית\". אחר כך פותחים מהאייקון." : ": בכרום לוחצים על ⋮ למעלה, ואז \"הוספה למסך הבית\" או \"התקנת אפליקציה\". אחר כך פותחים מהאייקון."}
+              </span>
+              <div style={styles.badgeBtns}>
+                {canInstall && <button onClick={installNow} style={styles.badgeYes}>הוספה למסך הבית</button>}
+                <button onClick={closeInstallTip} style={styles.badgeNo}>{canInstall ? "לא עכשיו" : "הבנתי"}</button>
+              </div>
+            </div>
+          )}
         </header>
 
         <div style={styles.greetingRow}>
@@ -2378,6 +2436,10 @@ export default function ShoppingList() {
 }
 
 const styles = {
+  badgeCard: { marginTop: 10, padding: "10px 12px", borderRadius: 12, background: "#FFFFFF", border: "1px solid #3E7C5955", color: "#243026", fontSize: "0.85rem", lineHeight: 1.5, display: "flex", flexDirection: "column", gap: 8, textAlign: "right" },
+  badgeBtns: { display: "flex", gap: 8 },
+  badgeYes: { padding: "6px 14px", borderRadius: 8, border: "none", background: "#3E7C59", color: "#fff", fontWeight: 700, fontFamily: "'Heebo', sans-serif", cursor: "pointer" },
+  badgeNo: { padding: "6px 14px", borderRadius: 8, border: "1px solid #24302633", background: "transparent", color: "#243026", fontFamily: "'Heebo', sans-serif", cursor: "pointer" },
   restoreBtn: { display: "block", margin: "10px auto 4px", padding: "6px 10px", border: "none", background: "transparent", color: "#3E7C59", fontFamily: "'Heebo', sans-serif", fontSize: "0.8rem", fontWeight: 600, textDecoration: "underline", cursor: "pointer" },
   remoteMsg: { marginTop: 6, color: "#3E7C59", fontWeight: 600, fontSize: "0.85rem" },
   page: { minHeight: "100vh", background: "radial-gradient(ellipse at top, #F7F8EF 0%, #EFF1E3 55%, #E6E9D7 100%)", padding: "28px 14px 120px", fontFamily: "'Heebo', sans-serif", position: "relative", display: "flex", justifyContent: "center" },

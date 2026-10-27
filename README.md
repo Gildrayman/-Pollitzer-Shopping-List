@@ -5,3 +5,4 @@
 - shopping-app/passkey.js — כניסה עם זיהוי פנים / טביעת אצבע
 - shopping-app/sync.js — שמירה וסנכרון בזמן אמת בין בני המשפחה (Firebase Realtime Database)
 - shopping-app/build.mjs — בניית index.html מהקוד
+- manifest.webmanifest, sw.js, icon-*.png, apple-touch-icon.png — התקנה למסך הבית ועיגול אדום על האייקון (shopping-app/badge.js)
