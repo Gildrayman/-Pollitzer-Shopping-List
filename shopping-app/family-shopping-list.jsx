@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { Plus, Check, ShoppingBasket, X, Users, Upload, FileText, Eye, ArrowRight, Send, MessageCircle, Save, History, Trash2, Mic } from "lucide-react";
 import { isSendPassword } from "./auth.js";
+import { getSyncStatus } from "./sync.js";
 import { speakHe, stopSpeaking, primeSpeech, onSpeechStatus, micTone, MIC_HELP } from "./speech.js";
 import { parseCommand, findProduct, findCategory, applyOp, speakItem, prettyHe, normHe, VOICE_HELP } from "./voice.js";
 
@@ -154,23 +155,7 @@ export const NAME_KEY = "family-shopping-list-member-name";
 const NOTES_KEY = "family-shopping-list-note-overrides";
 const NAMES_KEY = "family-shopping-list-name-overrides";
 const CURRENT_KEY = "family-shopping-list-current-saved-id";
-
-// window.storage exists only inside Claude.ai. Anywhere else, fall back to this
-// device's localStorage so the app still opens; lists are then not shared
-// between family members until a real shared backend replaces it.
-if (typeof window !== "undefined" && !window.storage) {
-  window.storage = {
-    async get(key) {
-      const value = window.localStorage.getItem(key);
-      if (value === null) throw new Error("not found: " + key);
-      return { key, value };
-    },
-    async set(key, value) {
-      window.localStorage.setItem(key, value);
-      return { key, value };
-    },
-  };
-}
+const HIDDEN_KEY = "family-shopping-list-hidden-products";
 
 export function greetingForHour(h) {
   if (h >= 5 && h < 12) return "בוקר טוב";
@@ -457,6 +442,8 @@ export default function ShoppingList() {
   const [noteMap, setNoteMap] = useState({});
   noteOverrides = noteMap;
   const [nameMap, setNameMap] = useState({});
+  // Built-in products the family removed from the catalog (by their original name).
+  const [hiddenProducts, setHiddenProducts] = useState([]);
   nameOverrides = nameMap;
 
   const setProductNote = async (name, text) => {
@@ -484,24 +471,7 @@ export default function ShoppingList() {
     }
     (async () => {
       await refreshList();
-      try {
-        const res = await window.storage.get(SAVED_KEY, true);
-        if (res && res.value) setSavedLists(JSON.parse(res.value));
-      } catch {
-        // no saved lists yet
-      }
-      try {
-        const res = await window.storage.get(CURRENT_KEY, true);
-        if (res && res.value) setCurrentListId(res.value);
-      } catch {
-        // no current saved list yet
-      }
-      try {
-        const res = await window.storage.get(CUSTOM_KEY, true);
-        if (res && res.value) setCustomProducts(JSON.parse(res.value));
-      } catch {
-        // no custom products yet
-      }
+      await refreshShared();
       try {
         const res = await window.storage.get(NAME_KEY, false);
         if (res && res.value) setUserName(res.value);
@@ -533,6 +503,60 @@ export default function ShoppingList() {
       // no renamed products yet
     }
   }, []);
+
+  const refreshShared = useCallback(async () => {
+    try {
+      const res = await window.storage.get(SAVED_KEY, true);
+      if (res && res.value) setSavedLists(JSON.parse(res.value));
+    } catch {
+      // no saved lists yet
+    }
+    try {
+      const res = await window.storage.get(CURRENT_KEY, true);
+      if (res && res.value) setCurrentListId(res.value);
+    } catch {
+      // no current saved list yet
+    }
+    try {
+      const res = await window.storage.get(CUSTOM_KEY, true);
+      if (res && res.value) setCustomProducts(JSON.parse(res.value));
+    } catch {
+      // no custom products yet
+    }
+    try {
+      const res = await window.storage.get(HIDDEN_KEY, true);
+      if (res && res.value) setHiddenProducts(JSON.parse(res.value));
+    } catch {
+      // no removed products yet
+    }
+  }, []);
+
+  // Live updates: another family member changed something, show it right away.
+  const [syncStatus, setSyncStatus] = useState(getSyncStatus());
+  const [remoteMsg, setRemoteMsg] = useState("");
+  useEffect(() => {
+    let hideTimer = null;
+    const onSync = (e) => {
+      refreshList();
+      refreshShared();
+      setSyncPulse(true);
+      setTimeout(() => setSyncPulse(false), 600);
+      const by = e.detail && e.detail.by;
+      if (by) {
+        setRemoteMsg(by.name ? `הרשימה עודכנה ע״י ${by.name}` : "הרשימה עודכנה מטלפון אחר");
+        clearTimeout(hideTimer);
+        hideTimer = setTimeout(() => setRemoteMsg(""), 3000);
+      }
+    };
+    const onStatus = (e) => setSyncStatus(e.detail);
+    window.addEventListener("family-sync", onSync);
+    window.addEventListener("family-sync-status", onStatus);
+    return () => {
+      clearTimeout(hideTimer);
+      window.removeEventListener("family-sync", onSync);
+      window.removeEventListener("family-sync-status", onStatus);
+    };
+  }, [refreshList, refreshShared]);
 
   useEffect(() => {
     const t = setInterval(() => {
@@ -729,7 +753,7 @@ export default function ShoppingList() {
   // Built-in catalog for a category plus the products the family added to it.
   // origName stays the catalog's own name, so a renamed product can be renamed again.
   const catalogFor = (cat) => [
-    ...(COMMON_ITEMS[cat] || []),
+    ...(COMMON_ITEMS[cat] || []).filter((p) => !hiddenProducts.includes(p.name.trim())),
     ...customProducts.filter((p) => p.category === cat).map((p) => ({ ...p, custom: true })),
   ].map((p) => ({ ...p, origName: p.name, name: displayName(p.name) }));
 
@@ -794,6 +818,28 @@ export default function ShoppingList() {
   };
 
   const removeCustomProduct = (id) => persistCustom(customProducts.filter((p) => p.id !== id));
+
+  const persistHidden = async (next) => {
+    setHiddenProducts(next);
+    try {
+      await window.storage.set(HIDDEN_KEY, JSON.stringify(next), true);
+    } catch (e) {
+      console.error("שגיאת שמירה", e);
+    }
+  };
+
+  // Removes any product from the catalog, for the whole family, after a confirmation.
+  const removeProduct = (item) => {
+    if (!window.confirm(`למחוק את "${item.name}" מהקטלוג?`)) return;
+    if (item.custom) removeCustomProduct(item.id);
+    else persistHidden([...hiddenProducts, item.origName.trim()]);
+  };
+
+  const hiddenIn = (cat) => (COMMON_ITEMS[cat] || []).filter((p) => hiddenProducts.includes(p.name.trim()));
+  const restoreHidden = (cat) => {
+    const names = hiddenIn(cat).map((p) => p.name.trim());
+    persistHidden(hiddenProducts.filter((n) => !names.includes(n)));
+  };
 
   const persistSaved = async (next) => {
     setSavedLists(next);
@@ -1773,9 +1819,13 @@ export default function ShoppingList() {
             <span style={styles.subText}>{remaining} פריטים לקנייה{doneCount > 0 ? ` · ${doneCount} נאספו` : ""}</span>
             <span style={{ ...styles.subText, opacity: syncPulse ? 1 : 0.45, transition: "opacity .3s" }}>
               <Users size={13} style={{ marginInlineEnd: 4, verticalAlign: "-2px" }} />
-              משותף למשפחה
+              {syncStatus === "live" ? "משותף למשפחה · בזמן אמת"
+                : syncStatus === "connecting" ? "מתחבר למשפחה…"
+                : syncStatus === "offline" ? "אין אינטרנט · נשמר בטלפון"
+                : "נשמר בטלפון הזה"}
             </span>
           </div>
+          {remoteMsg && <div role="status" style={styles.remoteMsg}>{remoteMsg}</div>}
         </header>
 
         <div style={styles.greetingRow}>
@@ -1949,15 +1999,13 @@ export default function ShoppingList() {
                     <EditableName name={item.name} onSave={(t) => renameProduct(item.name, t)} />
                     <EditableNote note={getCatalogNote(item.name)} onSave={(t) => setProductNote(item.name, t)} />
                   </span>
-                  {item.custom && (
-                    <button
-                      onClick={() => removeCustomProduct(item.id)}
-                      style={styles.removeProdBtn}
-                      aria-label="הסר מוצר מהקטלוג"
-                    >
-                      <X size={14} />
-                    </button>
-                  )}
+                  <button
+                    onClick={() => removeProduct(item)}
+                    style={styles.removeProdBtn}
+                    aria-label={`מחק ${item.name} מהקטלוג`}
+                  >
+                    <X size={14} />
+                  </button>
                   {activeTab === KG_CATEGORY && (
                     <KgStepper kg={getListKg(item.name)} onSet={(n) => setListKg(item.name, activeTab, n)} />
                   )}
@@ -1972,6 +2020,11 @@ export default function ShoppingList() {
                 </div>
               );
             })}
+            {hiddenIn(activeTab).length > 0 && (
+              <button onClick={() => restoreHidden(activeTab)} style={styles.restoreBtn}>
+                החזרת מוצרים שנמחקו מהקטגוריה ({hiddenIn(activeTab).length})
+              </button>
+            )}
           </div>
           )}
         </section>
@@ -2325,6 +2378,8 @@ export default function ShoppingList() {
 }
 
 const styles = {
+  restoreBtn: { display: "block", margin: "10px auto 4px", padding: "6px 10px", border: "none", background: "transparent", color: "#3E7C59", fontFamily: "'Heebo', sans-serif", fontSize: "0.8rem", fontWeight: 600, textDecoration: "underline", cursor: "pointer" },
+  remoteMsg: { marginTop: 6, color: "#3E7C59", fontWeight: 600, fontSize: "0.85rem" },
   page: { minHeight: "100vh", background: "radial-gradient(ellipse at top, #F7F8EF 0%, #EFF1E3 55%, #E6E9D7 100%)", padding: "28px 14px 120px", fontFamily: "'Heebo', sans-serif", position: "relative", display: "flex", justifyContent: "center" },
   texture: { position: "fixed", inset: 0, pointerEvents: "none", opacity: 0.5, backgroundImage: "radial-gradient(rgba(36,48,38,0.035) 1px, transparent 1px), radial-gradient(rgba(36,48,38,0.03) 1px, transparent 1px)", backgroundSize: "3px 3px, 7px 7px", backgroundPosition: "0 0, 2px 3px" },
   board: { width: "100%", maxWidth: 560, position: "relative", zIndex: 1 },
