@@ -284,13 +284,12 @@ function WithUnitsLabel({ show, children }) {
   );
 }
 
-// One line of the list as it is sent and saved: "2 × שם (הערה)", or with a weight
-// "2 קילו שם (הערה)". Meat and fish show one amount only, as the family asked:
-// more units than kilos → the units alone; otherwise → the kilos alone.
-// The email leaves out the "×" ("2 שם"), as the family asked (plain = true).
-function formatListLine({ qty, kg, name, note }, plain = false) {
-  const times = plain ? " " : " × ";
-  const amount = kg > 0 && qty <= kg ? `${kg} קילו ` : `${qty}${times}`;
+// One line of the list as it is shown, sent and saved: "2 שם (הערה)", or with a weight
+// "2 קילו שם (הערה)". Just one space between the amount and the name, as the family asked.
+// Meat and fish show one amount only: more units than kilos → the units alone;
+// otherwise → the kilos alone.
+function formatListLine({ qty, kg, name, note }) {
+  const amount = kg > 0 && qty <= kg ? `${kg} קילו ` : `${qty} `;
   return `${amount}${name}${note ? ` (${note})` : ""}`;
 }
 
@@ -1000,7 +999,7 @@ export default function ShoppingList() {
       const q = parseInt(it.qty, 10);
       const qty = Number.isFinite(q) && q > 0 ? q : 1;
       const note = getCatalogNote(it.name);
-      return formatListLine({ qty, kg: it.kg || 0, name: it.name, note }, true);
+      return formatListLine({ qty, kg: it.kg || 0, name: it.name, note });
     });
     // Plain-text mail has no alignment setting; a right-to-left mark at the start
     // of each line makes mail apps lay the Hebrew lines out from the right.
@@ -2299,7 +2298,7 @@ export default function ShoppingList() {
                       >
                         {p.include && <Check size={12} color="#243026" strokeWidth={3} />}
                       </button>
-                      <span style={{ ...styles.pickLabel, flex: 1, opacity: p.include ? 1 : 0.45 }}>{p.qty > 1 ? `${p.qty} × ` : ""}{p.name}</span>
+                      <span style={{ ...styles.pickLabel, flex: 1, opacity: p.include ? 1 : 0.45 }}>{p.qty > 1 ? `${p.qty} ` : ""}{p.name}</span>
                       <select value={p.category} onChange={(e) => setImportCategory(idx, e.target.value)} style={styles.importCatSelect}>
                         {CATEGORIES.map((c) => (<option key={c.id} value={c.id}>{c.label}</option>))}
                       </select>
