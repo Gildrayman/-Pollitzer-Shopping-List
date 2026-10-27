@@ -1547,7 +1547,7 @@ export default function ShoppingList() {
         reply(`לא הבנתי איזו מחלקה. ${CATEGORY_CHOICES}`);
         return;
       } else if (pending.kind === "np_add") {
-        if (cmd.type === "yes" || cmd.type === "add") {
+        if (cmd.type === "yes" || cmd.type === "add" || cmd.type === "inc") {
           const m = normHe(text).match(/\d+/);
           const r = applyOp(cur, { type: "add", product: pending.product, qty: m ? parseInt(m[0], 10) : null, kg: null }, makeItem, { maxKg: MAX_KG, kgCategory: KG_CATEGORY });
           persist(r.next, { quiet: true });
