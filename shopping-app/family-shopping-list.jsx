@@ -2209,17 +2209,19 @@ export default function ShoppingList() {
                     <EditableName name={it.name} onSave={(t) => renameProduct(it.name, t)} />
                     <EditableNote note={note} onSave={(t) => setProductNote(it.name, t)} />
                   </span>
-                  {it.category === KG_CATEGORY && (
+                  {/* In the summary show only what was chosen: kilos or units, not both. */}
+                  {it.category === KG_CATEGORY && kgOf(it) > 0 ? (
                     <KgStepper kg={kgOf(it)} onSet={(n) => setListKg(it.name, it.category, n)} />
+                  ) : (
+                    <WithUnitsLabel show={it.category === KG_CATEGORY}>
+                      <QtyStepper
+                        qty={qty}
+                        onInc={() => incrementListItem(it.name, it.category)}
+                        onDec={() => decrementListItem(it.name)}
+                        onSet={(n) => setListQty(it.name, it.category, n)}
+                      />
+                    </WithUnitsLabel>
                   )}
-                  <WithUnitsLabel show={it.category === KG_CATEGORY}>
-                    <QtyStepper
-                      qty={qty}
-                      onInc={() => incrementListItem(it.name, it.category)}
-                      onDec={() => decrementListItem(it.name)}
-                      onSet={(n) => setListQty(it.name, it.category, n)}
-                    />
-                  </WithUnitsLabel>
                 </div>
               );
             })}
