@@ -753,7 +753,7 @@ export default function ShoppingList() {
   const addCustomAndReset = () => {
     const text = customPick.trim();
     if (!text) return;
-    if (getListQty(text) === 0) {
+    if (!alreadyInList(text)) {
       incrementListItem(text, activeTab);
     }
     setCustomPick("");
@@ -776,7 +776,7 @@ export default function ShoppingList() {
   const addFinalCustomAndReset = () => {
     const text = finalCustomText.trim();
     if (!text) return;
-    if (getListQty(text) === 0) {
+    if (!alreadyInList(text)) {
       incrementListItem(text, guessCategory(text));
     }
     setFinalCustomText("");
@@ -2034,7 +2034,8 @@ export default function ShoppingList() {
             )}
             {catalogFor(activeTab).map((item) => {
               const qty = getListQty(item.name);
-              const inList = qty > 0;
+              // Chosen by kilos (units 0) counts as chosen too.
+              const inList = alreadyInList(item.name);
               return (
                 <div key={item.origName} className={`pick-row${flashName === item.name.trim() ? " flash-row" : ""}`} data-name={item.name.trim()} style={styles.pickRow}>
                   <button
