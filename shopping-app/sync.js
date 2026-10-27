@@ -10,7 +10,7 @@ import { sha256 } from "./auth.js";
 // The address of the family's Firebase Realtime Database, for example
 // "https://drayman-shopping-default-rtdb.europe-west1.firebasedatabase.app".
 // Empty: the list is saved on this phone only (still kept until deleted).
-export const FIREBASE_DB_URL = "";
+export const FIREBASE_DB_URL = "https://drayman-super-shopping-default-rtdb.europe-west1.firebasedatabase.app";
 
 const SYNC_KEY = "drayman-sync-key";
 const PENDING_KEY = "drayman-sync-pending";
