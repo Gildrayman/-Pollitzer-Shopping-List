@@ -295,11 +295,21 @@ const qtyOf = (it) => {
   return Number.isFinite(q) && q > 0 ? q : 1;
 };
 
+// A product has either kilos or units, never both (as the family asked).
+// Kilo items keep qty "0". Older items that had both count as kilos unless
+// they had more units than kilos.
+const isKiloItem = (it) => (it.kg || 0) > 0 && !((parseInt(it.qty, 10) || 0) > it.kg);
+export const kgOf = (it) => (isKiloItem(it) ? it.kg : 0);
+export const unitsOf = (it) => (isKiloItem(it) ? 0 : qtyOf(it));
+// The same product with kilos only / units only.
+export const withKg = (it, kg) => ({ ...it, kg, qty: "0" });
+export const withUnits = (it, n) => { const { kg, ...rest } = it; return { ...rest, qty: String(n) }; };
+
 // Says "3 עגבניות שרי" / "2 קילו שוק הודו". Like the written list, meat and fish
 // say one amount: the units when there are more units than kilos, otherwise the kilos.
 export function speakItem(it) {
-  const q = qtyOf(it);
-  if (it.kg > 0 && q <= it.kg) return `${it.kg} קילו ${it.name}`;
+  if (kgOf(it) > 0) return `${kgOf(it)} קילו ${it.name}`;
+  const q = unitsOf(it);
   return q > 1 ? `${q} ${it.name}` : `${it.name}, יחידה אחת`;
 }
 
@@ -324,11 +334,11 @@ export function applyOp(items, op, makeItem, { maxQty = 20, maxKg = 10, kgCatego
   // Meat and fish by weight: "תוסיף 2 קילו שוק" / "תוריד קילו שוק" change the kilos.
   if ((op.type === "inc" || op.type === "dec") && wantKg != null) {
     const sign = op.type === "inc" ? 1 : -1;
-    const base = existing || makeItem(name, op.product.category, "1");
+    const base = existing || makeItem(name, op.product.category, "0");
     if (!existing && sign < 0) return { next: items, say: `${name} לא נמצא ברשימה.` };
-    const kg = Math.min(maxKg, Math.max(0, (base.kg || 0) + sign * (wantKg || 1)));
-    const upd = { ...base, kg };
-    if (kg === 0 && sign < 0 && qtyOf(upd) <= 1) return { next: items.filter((_, i) => i !== idx), say: `הורדתי ${name} מהרשימה.` };
+    const kg = Math.min(maxKg, Math.max(0, kgOf(base) + sign * (wantKg || 1)));
+    if (kg === 0) return { next: items.filter((_, i) => i !== idx), say: `הורדתי ${name} מהרשימה.` };
+    const upd = withKg(base, kg);
     const next = existing ? replace(upd) : [upd, ...items];
     return { next, say: `${sign > 0 ? "הוספתי" : "הורדתי"}. עכשיו ${speakItem(upd)}.` };
   }
@@ -336,17 +346,24 @@ export function applyOp(items, op, makeItem, { maxQty = 20, maxKg = 10, kgCatego
     const step = wantQty || 1;
     if (op.type === "dec") {
       if (!existing) return { next: items, say: `${name} לא נמצא ברשימה.` };
-      const left = qtyOf(existing) - step;
+      // A kilo item lowered by a plain number loses that many kilos.
+      if (kgOf(existing) > 0) {
+        const kg = kgOf(existing) - step;
+        if (kg <= 0) return { next: items.filter((_, i) => i !== idx), say: `הורדתי ${name} מהרשימה.` };
+        return { next: replace(withKg(existing, kg)), say: `הורדתי. עכשיו ${speakItem(withKg(existing, kg))}.` };
+      }
+      const left = unitsOf(existing) - step;
       if (left <= 0) return { next: items.filter((_, i) => i !== idx), say: `הורדתי ${name} מהרשימה.` };
-      return { next: replace({ ...existing, qty: String(left) }), say: `הורדתי. עכשיו ${speakItem({ ...existing, qty: String(left) })}.` };
+      return { next: replace(withUnits(existing, left)), say: `הורדתי. עכשיו ${speakItem(withUnits(existing, left))}.` };
     }
     if (!existing) {
       const q = clampQ(step) || 1;
       const it = makeItem(name, op.product.category, String(q));
       return { next: [it, ...items], say: `הוספתי ${speakItem(it)}.` };
     }
-    const q = clampQ(qtyOf(existing) + step);
-    return { next: replace({ ...existing, qty: String(q) }), say: `הוספתי. עכשיו ${speakItem({ ...existing, qty: String(q) })}.` };
+    // Adding units to a kilo item switches it to units (the kilos are cleared).
+    const q = clampQ(unitsOf(existing) + step);
+    return { next: replace(withUnits(existing, q)), say: `הוספתי. עכשיו ${speakItem(withUnits(existing, q))}.` };
   }
   if (op.type === "set") {
     if (wantQty === 0 && wantKg == null) {
@@ -354,23 +371,22 @@ export function applyOp(items, op, makeItem, { maxQty = 20, maxKg = 10, kgCatego
       return { next: items.filter((_, i) => i !== idx), say: `הורדתי ${name} מהרשימה.` };
     }
     const base = existing || makeItem(name, op.product.category, "1");
-    const upd = { ...base };
-    if (wantQty != null) upd.qty = String(clampQ(wantQty) || 1);
-    if (wantKg != null) upd.kg = wantKg;
+    if (wantKg === 0 && wantQty == null) return { next: existing ? items.filter((_, i) => i !== idx) : items, say: existing ? `הורדתי ${name} מהרשימה.` : `${name} לא נמצא ברשימה.` };
+    const upd = wantKg ? withKg(base, wantKg) : withUnits(base, clampQ(wantQty == null ? unitsOf(base) : wantQty) || 1);
     const next = existing ? replace(upd) : [upd, ...items];
     return { next, say: `עדכנתי: ${speakItem(upd)}.${kgNote}` };
   }
   // add
   // A product already on the list takes the amount just said, higher or lower ("עגבניות 1" after 3 gives 1).
   if (existing) {
-    const upd = { ...existing };
-    if (wantKg != null) upd.kg = wantKg;
-    if (wantQty != null) upd.qty = String(clampQ(wantQty) || 1);
-    else if (wantKg == null) upd.qty = String(clampQ(qtyOf(existing) + 1));
+    let upd;
+    if (wantKg) upd = withKg(existing, wantKg);
+    else if (wantQty != null) upd = withUnits(existing, clampQ(wantQty) || 1);
+    else upd = withUnits(existing, clampQ(unitsOf(existing) + 1));
     return { next: replace(upd), say: `עדכנתי: ${speakItem(upd)}.${kgNote}` };
   }
-  const it = makeItem(name, op.product.category, String(clampQ(wantQty || 1) || 1));
-  if (wantKg != null) it.kg = wantKg;
+  const fresh = makeItem(name, op.product.category, "1");
+  const it = wantKg ? withKg(fresh, wantKg) : withUnits(fresh, clampQ(wantQty || 1) || 1);
   return { next: [it, ...items], say: `הוספתי ${speakItem(it)}.${kgNote}` };
 }
 

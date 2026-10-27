@@ -4,7 +4,7 @@ import { isSendPassword } from "./auth.js";
 import { getSyncStatus } from "./sync.js";
 import { isInstalled, isIOS, notifyPermission, badgePromptDone, markBadgePromptDone, enableBadge } from "./badge.js";
 import { speakHe, stopSpeaking, primeSpeech, onSpeechStatus, micTone, MIC_HELP } from "./speech.js";
-import { parseCommand, findProduct, findCategory, applyOp, speakItem, prettyHe, normHe, VOICE_HELP } from "./voice.js";
+import { parseCommand, findProduct, findCategory, applyOp, speakItem, prettyHe, normHe, VOICE_HELP, kgOf, unitsOf, withKg, withUnits } from "./voice.js";
 
 const CATEGORIES = [
   { id: "produce", label: "ירקות ופירות", color: "#8FB996", dark: "#4E7A5C" },
@@ -286,10 +286,10 @@ function WithUnitsLabel({ show, children }) {
 
 // One line of the list as it is shown, sent and saved: "2 שם (הערה)", or with a weight
 // "2 קילו שם (הערה)". Just one space between the amount and the name, as the family asked.
-// Meat and fish show one amount only: more units than kilos → the units alone;
-// otherwise → the kilos alone.
+// A product has kilos or units, never both; old saved lists that had both show the
+// units when there were more units than kilos, otherwise the kilos.
 function formatListLine({ qty, kg, name, note }) {
-  const amount = kg > 0 && qty <= kg ? `${kg} קילו ` : `${qty} `;
+  const amount = kg > 0 && !(qty > kg) ? `${kg} קילו ` : `${qty} `;
   return `${amount}${name}${note ? ` (${note})` : ""}`;
 }
 
@@ -646,12 +646,7 @@ export default function ShoppingList() {
       .filter((it) => !it.done)
       .slice()
       .reverse()
-      .map((it) => {
-        const q = parseInt(it.qty, 10);
-        const qty = Number.isFinite(q) && q > 0 ? q : 1;
-        const note = getCatalogNote(it.name);
-        return formatListLine({ qty, kg: it.kg || 0, name: it.name, note });
-      });
+      .map((it) => formatListLine({ qty: unitsOf(it), kg: kgOf(it), name: it.name, note: getCatalogNote(it.name) }));
     const text = lines.join("\n");
     setSummaryText(text);
     window.storage.set(SUMMARY_KEY, text, true).catch(() => {});
@@ -669,11 +664,10 @@ export default function ShoppingList() {
   const alreadyInList = (itemName) =>
     items.some((it) => it.name.trim() === itemName.trim() && !it.done);
 
+  // A product has units or kilos, never both: changing one clears the other.
   const getListQty = (itemName) => {
     const existing = items.find((it) => it.name.trim() === itemName.trim() && !it.done);
-    if (!existing) return 0;
-    const n = parseInt(existing.qty, 10);
-    return Number.isFinite(n) && n > 0 ? n : 1;
+    return existing ? unitsOf(existing) : 0;
   };
 
   const incrementListItem = (itemName, cat) => {
@@ -682,19 +676,19 @@ export default function ShoppingList() {
       persist([makeItem(itemName, cat, "1"), ...items]);
       return;
     }
-    const current = getListQty(itemName);
-    const next = Math.min(20, current + 1);
-    persist(items.map((it) => (it.id === existing.id ? { ...it, qty: String(next) } : it)));
+    const next = Math.min(20, unitsOf(existing) + 1);
+    persist(items.map((it) => (it.id === existing.id ? withUnits(it, next) : it)));
   };
 
   const decrementListItem = (itemName) => {
     const existing = items.find((it) => it.name.trim() === itemName.trim() && !it.done);
     if (!existing) return;
-    const current = getListQty(itemName);
+    const current = unitsOf(existing);
+    if (current === 0) return; // kilos only: the units are already zero
     if (current <= 1) {
       persist(items.filter((it) => it.id !== existing.id));
     } else {
-      persist(items.map((it) => (it.id === existing.id ? { ...it, qty: String(current - 1) } : it)));
+      persist(items.map((it) => (it.id === existing.id ? withUnits(it, current - 1) : it)));
     }
   };
 
@@ -703,30 +697,34 @@ export default function ShoppingList() {
     const qty = Math.min(20, Math.max(0, n));
     const existing = items.find((it) => it.name.trim() === itemName.trim() && !it.done);
     if (qty === 0) {
-      if (existing) persist(items.filter((it) => it.id !== existing.id));
+      if (existing && unitsOf(existing) > 0) persist(items.filter((it) => it.id !== existing.id));
       return;
     }
     if (!existing) {
       persist([makeItem(itemName, cat, String(qty)), ...items]);
       return;
     }
-    persist(items.map((it) => (it.id === existing.id ? { ...it, qty: String(qty) } : it)));
+    persist(items.map((it) => (it.id === existing.id ? withUnits(it, qty) : it)));
   };
 
   const getListKg = (itemName) => {
     const existing = items.find((it) => it.name.trim() === itemName.trim() && !it.done);
-    return existing && existing.kg > 0 ? existing.kg : 0;
+    return existing ? kgOf(existing) : 0;
   };
 
-  // Setting a weight on a product that isn't on the list yet adds it (count 1).
+  // Setting a weight adds the product if needed and clears its units; 0 kilos removes it.
   const setListKg = (itemName, cat, n) => {
     const kg = Math.min(MAX_KG, Math.max(0, n));
     const existing = items.find((it) => it.name.trim() === itemName.trim() && !it.done);
     if (!existing) {
-      if (kg > 0) persist([{ ...makeItem(itemName, cat, "1"), kg }, ...items]);
+      if (kg > 0) persist([withKg(makeItem(itemName, cat, "0"), kg), ...items]);
       return;
     }
-    persist(items.map((it) => (it.id === existing.id ? { ...it, kg } : it)));
+    if (kg === 0) {
+      if (kgOf(existing) > 0) persist(items.filter((it) => it.id !== existing.id));
+      return;
+    }
+    persist(items.map((it) => (it.id === existing.id ? withKg(it, kg) : it)));
   };
 
   const toggleCheck = (itemName, cat) => {
@@ -899,16 +897,13 @@ export default function ShoppingList() {
   // (keeping its creation date) until "רשימה חדשה" is pressed.
   const saveCurrentList = () => {
     if (finalItems.length === 0) return false;
-    const snapshot = finalItems.map((it) => {
-      const q = parseInt(it.qty, 10);
-      return {
-        name: it.name,
-        category: it.category,
-        qty: Number.isFinite(q) && q > 0 ? q : 1,
-        kg: it.kg || 0,
-        note: getCatalogNote(it.name),
-      };
-    });
+    const snapshot = finalItems.map((it) => ({
+      name: it.name,
+      category: it.category,
+      qty: unitsOf(it),
+      kg: kgOf(it),
+      note: getCatalogNote(it.name),
+    }));
     const existing = currentListId ? savedLists.find((l) => l.id === currentListId) : null;
     if (existing) {
       persistSaved(savedLists.map((l) => (l.id === existing.id ? { ...l, items: snapshot } : l)));
@@ -941,10 +936,7 @@ export default function ShoppingList() {
   const listSig = (arr) => arr.map((x) => `${x.name.trim()}|${x.qty}|${x.kg || 0}`).join(";");
   const savedForCurrent = currentListId ? savedLists.find((l) => l.id === currentListId) : null;
   const currentSig = listSig(
-    finalItems.map((it) => {
-      const q = parseInt(it.qty, 10);
-      return { name: it.name, qty: Number.isFinite(q) && q > 0 ? q : 1, kg: it.kg || 0 };
-    })
+    finalItems.map((it) => ({ name: it.name, qty: unitsOf(it), kg: kgOf(it) }))
   );
   const hasUnsaved =
     finalItems.length > 0 && (!savedForCurrent || listSig(savedForCurrent.items) !== currentSig);
@@ -982,7 +974,11 @@ export default function ShoppingList() {
   const loadSaved = (list) => {
     const toAdd = list.items
       .filter((s) => !items.some((it) => it.name.trim() === s.name.trim() && !it.done))
-      .map((s) => ({ ...makeItem(s.name, s.category, String(s.qty)), ...(s.kg ? { kg: s.kg } : {}) }));
+      .map((s) => {
+        const it = makeItem(s.name, s.category, "1");
+        const kg = kgOf(s);
+        return kg > 0 ? withKg(it, kg) : withUnits(it, unitsOf(s));
+      });
     if (toAdd.length) persist([...toAdd.reverse(), ...items]);
     setShowSaved(false);
     setShowFinal(true);
@@ -995,12 +991,8 @@ export default function ShoppingList() {
   const visibleSaved = searchDate ? sortedSaved.filter((l) => localDay(l.savedAt) === searchDate) : sortedSaved;
 
   const buildEmailBody = () => {
-    const lines = finalItems.map((it) => {
-      const q = parseInt(it.qty, 10);
-      const qty = Number.isFinite(q) && q > 0 ? q : 1;
-      const note = getCatalogNote(it.name);
-      return formatListLine({ qty, kg: it.kg || 0, name: it.name, note });
-    });
+    const lines = finalItems.map((it) =>
+      formatListLine({ qty: unitsOf(it), kg: kgOf(it), name: it.name, note: getCatalogNote(it.name) }));
     // Plain-text mail has no alignment setting; a right-to-left mark at the start
     // of each line makes mail apps lay the Hebrew lines out from the right.
     const RLM = "\u200f";
@@ -2185,8 +2177,7 @@ export default function ShoppingList() {
               <p style={{ ...styles.pickHint, padding: "14px 8px" }}>הרשימה עדיין ריקה.</p>
             )}
             {finalItems.map((it) => {
-              const q = parseInt(it.qty, 10);
-              const qty = Number.isFinite(q) && q > 0 ? q : 1;
+              const qty = unitsOf(it);
               const note = getCatalogNote(it.name);
               const cat = catInfo(it.category);
               return (
@@ -2203,7 +2194,7 @@ export default function ShoppingList() {
                     <EditableNote note={note} onSave={(t) => setProductNote(it.name, t)} />
                   </span>
                   {it.category === KG_CATEGORY && (
-                    <KgStepper kg={it.kg || 0} onSet={(n) => setListKg(it.name, it.category, n)} />
+                    <KgStepper kg={kgOf(it)} onSet={(n) => setListKg(it.name, it.category, n)} />
                   )}
                   <WithUnitsLabel show={it.category === KG_CATEGORY}>
                     <QtyStepper
