@@ -127,9 +127,13 @@ export default function PasswordGate({ children }) {
     );
   }
 
+  // Never waits more than a moment, so the login can't get stuck here.
   const loadName = async () => {
     try {
-      const res = await window.storage.get(NAME_KEY, false);
+      const res = await Promise.race([
+        window.storage.get(NAME_KEY, false),
+        new Promise((resolve) => setTimeout(() => resolve(null), 1500)),
+      ]);
       return res && res.value ? res.value : "";
     } catch {
       return "";
@@ -176,7 +180,7 @@ export default function PasswordGate({ children }) {
   const saveName = async (n) => {
     const name = String(n || "").trim();
     if (!name) return;
-    try { await window.storage.set(NAME_KEY, name, false); } catch {}
+    window.storage.set(NAME_KEY, name, false).catch(() => {});
     setSavedName(name);
     const { password } = askNameStep;
     setAskNameStep(null);

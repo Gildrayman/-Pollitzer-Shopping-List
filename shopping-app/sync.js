@@ -234,8 +234,9 @@ if (typeof window !== "undefined") {
   // Another tab on the same phone changed something.
   window.addEventListener("storage", (e) => { const k = familyKeyOf(e.key); if (k) notify([k], null); });
 
-  // Replaces Claude.ai's storage outside Claude.ai (Claude.ai keeps its own).
-  if (!window.storage) {
+  // The app always keeps its data this way, also inside Claude.ai, so each
+  // family's data stays apart and the login never waits on another store.
+  {
     window.storage = {
       async get(key, shared) {
         if (shared) sharedKeys[key] = true;
