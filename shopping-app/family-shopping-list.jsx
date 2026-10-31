@@ -1916,9 +1916,7 @@ export default function ShoppingList() {
                           {formatListLine({ qty: s.qty, kg: s.kg || 0, name: s.name, note: s.note })}
                         </div>
                       ))}
-                    </div>
-                  )}
-                  <div style={{ ...styles.savedActions, padding: "0 8px 12px", marginTop: open ? 0 : 2 }}>
+                      <div style={styles.savedActions}>
                     {confirmDeleteId === l.id ? (
                       <>
                         <button onClick={() => { deleteSaved(l.id); setConfirmDeleteId(null); }} className="chalk-btn" style={{ ...styles.finalTopBtn, color: "#A33A31", borderColor: "#A33A31" }}>
@@ -1940,7 +1938,9 @@ export default function ShoppingList() {
                         </button>
                       </>
                     )}
-                  </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               );
             })}
