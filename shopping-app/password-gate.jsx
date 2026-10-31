@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { NAME_KEY, greetingForHour } from "./family-shopping-list.jsx";
 import { speakHe } from "./speech.js";
-import { sha256, PASSWORD_HASH } from "./auth.js";
+import { familyForPassword, rememberedFamily, currentFamily, setFamily } from "./families.js";
 import { startSync } from "./sync.js";
 import { ScanFace } from "lucide-react";
 import {
@@ -27,6 +27,10 @@ export default function PasswordGate({ children }) {
   const [offerFace, setOfferFace] = useState(false);
   const [faceBusy, setFaceBusy] = useState(false);
   const [faceNote, setFaceNote] = useState("");
+  // The family this phone signs in to; the password decides it.
+  const [family, setFamilyState] = useState(rememberedFamily());
+  // After a correct password on a phone that has no name for that family yet.
+  const [askNameStep, setAskNameStep] = useState(null); // { password }
 
   useEffect(() => {
     faceLoginSupported().then(setFaceSupported);
@@ -58,7 +62,8 @@ export default function PasswordGate({ children }) {
     return () => document.removeEventListener("visibilitychange", onVisibility);
   }, [unlocked]);
 
-  if (unlocked) return children;
+  // A new key per family makes the list start fresh from that family's data.
+  if (unlocked) return <React.Fragment key={currentFamily().id}>{children}</React.Fragment>;
 
   const welcome = (who) => {
     speakHe(`${greetingForHour(new Date().getHours())}${who ? `, ${who}` : ""}. לשליטה קולית, לחצו על כפתור המיקרופון בפינה השמאלית התחתונה של המסך.`);
@@ -122,26 +127,45 @@ export default function PasswordGate({ children }) {
     );
   }
 
-  const askName = savedName === "";
-  const canSubmit = value.trim() && (!askName || nameDraft.trim());
+  const loadName = async () => {
+    try {
+      const res = await window.storage.get(NAME_KEY, false);
+      return res && res.value ? res.value : "";
+    } catch {
+      return "";
+    }
+  };
+
+  // Correct password and a known name: open the family's list.
+  const enter = (password, who) => {
+    startSync(password);
+    if (faceSupported && !hasFaceLogin() && !faceLoginDeclined()) {
+      speakHe(`${greetingForHour(new Date().getHours())}${who ? `, ${who}` : ""}.`);
+      setOfferFace(true);
+    } else {
+      welcome(who);
+    }
+  };
+
+  const canSubmit = !!value.trim();
 
   const submit = async (e) => {
     e.preventDefault();
     if (!canSubmit) return;
-    if (sha256(value.trim()) === PASSWORD_HASH) {
-      if (askName) {
-        const n = nameDraft.trim();
-        try { await window.storage.set(NAME_KEY, n, false); } catch {}
-        setSavedName(n);
+    const f = familyForPassword(value);
+    if (f) {
+      const password = value.trim();
+      setFamily(f.id);
+      setFamilyState(f);
+      setFaceReady(hasFaceLogin());
+      const who = await loadName();
+      setSavedName(who);
+      if (!who) {
+        setNameDraft("");
+        setAskNameStep({ password });
+        return;
       }
-      startSync(value);
-      const who = askName ? nameDraft.trim() : savedName;
-      if (faceSupported && !hasFaceLogin() && !faceLoginDeclined()) {
-        speakHe(`${greetingForHour(new Date().getHours())}${who ? `, ${who}` : ""}.`);
-        setOfferFace(true);
-      } else {
-        welcome(who);
-      }
+      enter(password, who);
     } else {
       setError("הסיסמה לא נכונה. נסו שוב.");
       speakHe("הסיסמה לא נכונה. נסו שוב.");
@@ -149,37 +173,64 @@ export default function PasswordGate({ children }) {
     }
   };
 
+  const saveName = async (n) => {
+    const name = String(n || "").trim();
+    if (!name) return;
+    try { await window.storage.set(NAME_KEY, name, false); } catch {}
+    setSavedName(name);
+    const { password } = askNameStep;
+    setAskNameStep(null);
+    enter(password, name);
+  };
+
+  if (askNameStep) {
+    const members = currentFamily().members;
+    return (
+      <div dir="rtl" style={styles.page}>
+        <form onSubmit={(e) => { e.preventDefault(); saveName(nameDraft); }} style={styles.card}>
+          <h1 style={styles.title}>ברוכים הבאים ל{currentFamily().name}</h1>
+          <p style={styles.sub}>{members.length ? "מי את/ה?" : "איך קוראים לך?"} נשאל רק בפעם הראשונה בטלפון הזה.</p>
+          {members.length > 0 && (
+            <div style={styles.chips}>
+              {members.map((m) => (
+                <button key={m} type="button" onClick={() => saveName(m)} style={styles.chip}>{m}</button>
+              ))}
+            </div>
+          )}
+          <label htmlFor="family-name" style={styles.label}>{members.length ? "או הקלידו שם" : "השם שלך"}</label>
+          <input
+            id="family-name"
+            type="text"
+            autoComplete="given-name"
+            placeholder={currentFamily().namePlaceholder}
+            value={nameDraft}
+            onChange={(e) => setNameDraft(e.target.value)}
+            style={{ ...styles.input, direction: "rtl", textAlign: "right" }}
+          />
+          <button type="submit" disabled={!nameDraft.trim()} style={{ ...styles.button, opacity: nameDraft.trim() ? 1 : 0.5 }}>
+            המשך
+          </button>
+        </form>
+      </div>
+    );
+  }
+
   return (
     <div dir="rtl" style={styles.page}>
       <style>{"@import url('https://fonts.googleapis.com/css2?family=Suez+One&family=Heebo:wght@400;600;700&display=swap');"}</style>
       <form onSubmit={submit} style={styles.card}>
-        <h1 style={styles.title}>קניות משפחת דריימן</h1>
-        {savedName ? (
+        <h1 style={styles.title}>{family ? `קניות ${family.name}` : "רשימת קניות משפחתית"}</h1>
+        {family && savedName ? (
           <p style={styles.greet}>{greetingForHour(new Date().getHours())}, {savedName}</p>
         ) : null}
-        <p style={styles.sub}>הכניסה למשפחה בלבד. {faceReady && faceSupported ? "היכנסו עם זיהוי פנים או הקלידו סיסמה." : "הקלידו את הסיסמה כדי להמשיך."}</p>
-        {faceReady && faceSupported && (
+        <p style={styles.sub}>הכניסה למשפחה בלבד. {family && faceReady && faceSupported ? "היכנסו עם זיהוי פנים או הקלידו סיסמה." : "הקלידו את הסיסמה כדי להמשיך."}</p>
+        {family && faceReady && faceSupported && (
           <>
             <button type="button" onClick={loginWithFace} disabled={faceBusy} style={{ ...styles.button, ...styles.faceBtn, opacity: faceBusy ? 0.6 : 1 }}>
               <ScanFace size={22} style={{ marginInlineEnd: 8, verticalAlign: "-6px" }} />
               כניסה עם זיהוי פנים
             </button>
             <p style={styles.or}>או עם סיסמה</p>
-          </>
-        )}
-        {askName && (
-          <>
-            <label htmlFor="family-name" style={styles.label}>השם שלך</label>
-            <input
-              id="family-name"
-              type="text"
-              autoComplete="given-name"
-              placeholder="למשל: גיל"
-              value={nameDraft}
-              onChange={(e) => setNameDraft(e.target.value)}
-              style={{ ...styles.input, direction: "rtl", textAlign: "right" }}
-            />
-            <p style={styles.hint}>נשאל רק בפעם הראשונה בטלפון הזה.</p>
           </>
         )}
         <label htmlFor="family-password" style={styles.label}>סיסמה</label>
@@ -195,7 +246,7 @@ export default function PasswordGate({ children }) {
         <button type="submit" disabled={!canSubmit} style={{ ...styles.button, opacity: canSubmit ? 1 : 0.5 }}>
           כניסה
         </button>
-        {faceSupported && !faceReady && faceLoginDeclined() && (
+        {family && faceSupported && !faceReady && faceLoginDeclined() && (
           <button type="button" onClick={() => { undeclineFaceLogin(); setFaceNote("הקלידו את הסיסמה, ומיד אחר כך נפעיל זיהוי פנים."); }} style={styles.linkBtn}>
             להפעיל כניסה עם זיהוי פנים
           </button>
@@ -217,6 +268,8 @@ const styles = {
   hint: { margin: "-4px 0 4px", color: "#7C8574", fontSize: "0.8rem" },
   faceBtn: { marginTop: 0, display: "flex", alignItems: "center", justifyContent: "center" },
   or: { margin: "2px 0", color: "#7C8574", fontSize: "0.85rem", textAlign: "center" },
+  chips: { display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "center", margin: "4px 0 6px" },
+  chip: { padding: "10px 18px", borderRadius: 999, border: "1px solid #3E7C5966", background: "#EEF5EF", color: "#243026", fontSize: "1.05rem", fontWeight: 600, fontFamily: "'Heebo', sans-serif", cursor: "pointer" },
   linkBtn: { marginTop: 4, padding: "8px", border: "none", background: "transparent", color: "#3E7C59", fontSize: "0.9rem", fontWeight: 600, fontFamily: "'Heebo', sans-serif", cursor: "pointer", textDecoration: "underline" },
   error: { margin: 0, color: "#A33A31", fontSize: "0.9rem" },
   button: { marginTop: 6, padding: "12px 14px", borderRadius: 10, border: "none", background: "#3E7C59", color: "#FFFFFF", fontSize: "1rem", fontWeight: 700, fontFamily: "'Heebo', sans-serif", cursor: "pointer" },

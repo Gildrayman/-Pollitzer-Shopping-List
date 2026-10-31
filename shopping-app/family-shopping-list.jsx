@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { Plus, Check, ShoppingBasket, X, Users, Upload, FileText, Eye, ArrowRight, Send, MessageCircle, Save, History, Trash2, Mic } from "lucide-react";
-import { isSendPassword } from "./auth.js";
+import { isSendPassword, currentFamily } from "./families.js";
 import { getSyncStatus } from "./sync.js";
 import { isInstalled, isIOS, notifyPermission, badgePromptDone, markBadgePromptDone, enableBadge } from "./badge.js";
 import { speakHe, stopSpeaking, primeSpeech, onSpeechStatus, micTone, MIC_HELP } from "./speech.js";
@@ -471,7 +471,7 @@ export default function ShoppingList() {
 
   useEffect(() => {
     try {
-      document.title = "קניות משפחת דריימן";
+      document.title = `קניות ${currentFamily().name}`;
     } catch (e) {
       // document not available in this environment — ignore
     }
@@ -1011,13 +1011,13 @@ export default function ShoppingList() {
     // Plain-text mail has no alignment setting; a right-to-left mark at the start
     // of each line makes mail apps lay the Hebrew lines out from the right.
     const RLM = "\u200f";
-    return ["גיל דריימן", "המגדל 11 כרכור", "052-4350444", "", "", ...lines]
+    return [...currentFamily().order.header, "", "", ...lines]
       .map((line) => (line ? RLM + line : line))
       .join("\n");
   };
 
-  const emailSubject = "גיל דריימן - 052-4350444";
-  const mailtoHref = `mailto:karkur@politzer.co.il?subject=${encodeURIComponent(emailSubject)}&body=${encodeURIComponent(buildEmailBody())}`;
+  const emailSubject = currentFamily().order.subject;
+  const mailtoHref = `mailto:${currentFamily().order.email}?subject=${encodeURIComponent(emailSubject)}&body=${encodeURIComponent(buildEmailBody())}`;
   const whatsappHref = `https://wa.me/?text=${encodeURIComponent(buildEmailBody())}`;
 
   // Opens the phone's mail app with recipient, subject and body filled in (nothing is sent automatically).
@@ -1856,7 +1856,7 @@ export default function ShoppingList() {
         <header style={styles.header}>
           <div style={styles.titleWrap}>
             <ShoppingBasket size={20} color="#243026" strokeWidth={1.8} />
-            <h1 style={styles.title}>רשימת קניות משפחת דריימן</h1>
+            <h1 style={styles.title}>רשימת קניות {currentFamily().name}</h1>
           </div>
           <svg width="220" height="14" viewBox="0 0 220 14" style={styles.scribble}>
             <path d="M2 8 Q 20 2, 40 8 T 80 8 T 120 8 T 160 8 T 200 8 T 218 8" stroke="#3E7C59" strokeWidth="3" fill="none" strokeLinecap="round" />
@@ -2339,7 +2339,7 @@ export default function ShoppingList() {
             </div>
             {mailStep === "confirm" ? (
               <>
-                <p style={styles.mailStepText}>הרשימה ({finalItems.length} מוצרים) תישלח ל-karkur@politzer.co.il</p>
+                <p style={styles.mailStepText}>הרשימה ({finalItems.length} מוצרים) {currentFamily().order.email ? `תישלח ל-${currentFamily().order.email}` : "תיפתח באפליקציית המייל, ושם בוחרים למי לשלוח"}</p>
                 <div style={styles.mailStepBtns}>
                   <button onClick={() => setMailStep("password")} className="chalk-btn" style={{ ...styles.confirmBtn, flex: 1 }} autoFocus>
                     כן, להמשיך

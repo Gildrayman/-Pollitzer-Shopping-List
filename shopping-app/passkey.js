@@ -2,8 +2,11 @@
 // The phone checks the face or finger itself; the app only learns that it succeeded.
 // It is turned on after a correct password, so the phone already belongs to the family.
 
-const CRED_KEY = "drayman-passkey-id";
-const DECLINED_KEY = "drayman-passkey-declined";
+import { currentFamily } from "./families.js";
+
+// Each family keeps its own Face ID on the phone (the Drayman family's names are unchanged).
+const CRED_KEY = () => currentFamily().passkeyKey;
+const DECLINED_KEY = () => currentFamily().passkeyDeclinedKey;
 
 const ls = {
   get(k) { try { return window.localStorage.getItem(k); } catch { return null; } },
@@ -25,19 +28,19 @@ export async function faceLoginSupported() {
   }
 }
 
-export const hasFaceLogin = () => !!ls.get(CRED_KEY);
-export const faceLoginDeclined = () => !!ls.get(DECLINED_KEY);
-export const declineFaceLogin = () => ls.set(DECLINED_KEY, "1");
-export const undeclineFaceLogin = () => ls.del(DECLINED_KEY);
-export const removeFaceLogin = () => ls.del(CRED_KEY);
+export const hasFaceLogin = () => !!ls.get(CRED_KEY());
+export const faceLoginDeclined = () => !!ls.get(DECLINED_KEY());
+export const declineFaceLogin = () => ls.set(DECLINED_KEY(), "1");
+export const undeclineFaceLogin = () => ls.del(DECLINED_KEY());
+export const removeFaceLogin = () => ls.del(CRED_KEY());
 
 // Must run from a tap. Asks the phone for Face ID / fingerprint once and remembers it.
 export async function registerFaceLogin(name) {
   const cred = await navigator.credentials.create({
     publicKey: {
       challenge: randomBytes(32),
-      rp: { name: "קניות משפחת דריימן" },
-      user: { id: randomBytes(16), name: name || "family", displayName: name || "משפחת דריימן" },
+      rp: { name: `קניות ${currentFamily().name}` },
+      user: { id: randomBytes(16), name: name || "family", displayName: name || currentFamily().name },
       pubKeyCredParams: [{ type: "public-key", alg: -7 }, { type: "public-key", alg: -257 }],
       authenticatorSelection: { authenticatorAttachment: "platform", userVerification: "required", residentKey: "preferred" },
       timeout: 60000,
@@ -45,13 +48,13 @@ export async function registerFaceLogin(name) {
     },
   });
   if (!cred) throw new Error("no credential");
-  ls.set(CRED_KEY, toB64(cred.rawId));
-  ls.del(DECLINED_KEY);
+  ls.set(CRED_KEY(), toB64(cred.rawId));
+  ls.del(DECLINED_KEY());
 }
 
 // Must run from a tap. Resolves true only when the phone confirmed the face or finger.
 export async function faceLogin() {
-  const id = ls.get(CRED_KEY);
+  const id = ls.get(CRED_KEY());
   if (!id) return false;
   const assertion = await navigator.credentials.get({
     publicKey: {

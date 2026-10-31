@@ -6,14 +6,16 @@
 // app used inside Claude.ai. Keys with shared=false (like the name) stay on this phone.
 
 import { sha256 } from "./auth.js";
+import { localKey } from "./families.js";
 
 // The address of the family's Firebase Realtime Database, for example
 // "https://drayman-shopping-default-rtdb.europe-west1.firebasedatabase.app".
 // Empty: the list is saved on this phone only (still kept until deleted).
 export const FIREBASE_DB_URL = "https://drayman-super-shopping-default-rtdb.europe-west1.firebasedatabase.app";
 
-const SYNC_KEY = "drayman-sync-key";
-const PENDING_KEY = "drayman-sync-pending";
+// Kept per family on the phone (the Drayman family's names are unchanged).
+const SYNC_KEY = () => localKey("drayman-sync-key");
+const PENDING_KEY = () => localKey("drayman-sync-pending");
 const DEVICE_KEY = "drayman-device-id";
 const LAST_CHANGE = "_lastChange";
 const MEMBER_NAME_KEY = "family-shopping-list-member-name";
@@ -23,6 +25,11 @@ const ls = {
   set(k, v) { try { window.localStorage.setItem(k, v); } catch {} },
   del(k) { try { window.localStorage.removeItem(k); } catch {} },
 };
+// The same, for the signed-in family's own keys.
+const fs = {
+  get: (k) => ls.get(localKey(k)),
+  set: (k, v) => ls.set(localKey(k), v),
+};
 
 const deviceId = (() => {
   let id = ls.get(DEVICE_KEY);
@@ -30,8 +37,8 @@ const deviceId = (() => {
   return id;
 })();
 
-const readPending = () => { try { return JSON.parse(ls.get(PENDING_KEY) || "{}"); } catch { return {}; } };
-const writePending = (p) => (Object.keys(p).length ? ls.set(PENDING_KEY, JSON.stringify(p)) : ls.del(PENDING_KEY));
+const readPending = () => { try { return JSON.parse(ls.get(PENDING_KEY()) || "{}"); } catch { return {}; } };
+const writePending = (p) => (Object.keys(p).length ? ls.set(PENDING_KEY(), JSON.stringify(p)) : ls.del(PENDING_KEY()));
 
 let familyPath = null; // families/<secret> once signed in
 let source = null;
@@ -62,7 +69,7 @@ async function flush(leaving = false) {
   const keys = Object.keys(pending);
   if (!keys.length) return;
   flushing = true;
-  const name = ls.get(MEMBER_NAME_KEY) || "";
+  const name = fs.get(MEMBER_NAME_KEY) || "";
   try {
     const res = await fetch(`${baseUrl()}.json`, {
       method: "PATCH",
@@ -94,7 +101,7 @@ function applyRemote(entries, by) {
     if (k === LAST_CHANGE || k in pending) continue;
     if (v === null || v === undefined) continue;
     const str = typeof v === "string" ? v : JSON.stringify(v);
-    if (ls.get(k) !== str) { ls.set(k, str); changed.push(k); }
+    if (fs.get(k) !== str) { fs.set(k, str); changed.push(k); }
   }
   notify(changed, by);
 }
@@ -132,11 +139,11 @@ function mergeOnce(entries, pending) {
   for (const [key, merge] of Object.entries(MERGERS)) {
     if (key in pending) continue;
     const server = parse(entries[key]);
-    const local = parse(ls.get(key));
-    if (!server || !local || entries[key] === ls.get(key)) continue;
+    const local = parse(fs.get(key));
+    if (!server || !local || entries[key] === fs.get(key)) continue;
     if (Array.isArray(server) !== Array.isArray(local)) continue;
     const merged = JSON.stringify(merge(server, local));
-    if (merged !== entries[key]) { ls.set(key, merged); pending[key] = merged; }
+    if (merged !== entries[key]) { fs.set(key, merged); pending[key] = merged; }
   }
   done[familyPath] = Date.now();
   ls.set(MERGED_KEY, JSON.stringify(done));
@@ -162,7 +169,7 @@ function connect() {
         // First load: anything this phone has that the family copy lacks is sent up.
         const pending = readPending();
         for (const k of localSharedKeys()) {
-          if (!(k in entries) && ls.get(k) !== null && !(k in pending)) pending[k] = ls.get(k);
+          if (!(k in entries) && fs.get(k) !== null && !(k in pending)) pending[k] = fs.get(k);
         }
         mergeOnce(entries, pending);
         writePending(pending);
@@ -183,13 +190,21 @@ function connect() {
 }
 
 // Keys the app has used as shared, so a first phone can seed the family copy.
+// Only the signed-in family's keys are looked at, so one family's list never
+// reaches another family's copy, even on a phone both have used.
 const sharedKeys = {};
+const familyKeyOf = (stored) => {
+  const prefix = localKey("");
+  if (!stored || !stored.startsWith(prefix)) return null;
+  const k = stored.slice(prefix.length);
+  return k.startsWith("family-shopping-list-") && k !== MEMBER_NAME_KEY ? k : null;
+};
 const localSharedKeys = () => {
   const keys = new Set(Object.keys(sharedKeys));
   try {
     for (let i = 0; i < window.localStorage.length; i++) {
-      const k = window.localStorage.key(i);
-      if (k && k.startsWith("family-shopping-list-") && k !== MEMBER_NAME_KEY) keys.add(k);
+      const k = familyKeyOf(window.localStorage.key(i));
+      if (k) keys.add(k);
     }
   } catch {}
   return [...keys];
@@ -198,9 +213,9 @@ const localSharedKeys = () => {
 // Called after a correct password or face login. The family's place in the
 // database is derived from the password, so only someone who knows it can reach it.
 export function startSync(password) {
-  if (password) ls.set(SYNC_KEY, sha256("drayman-family-sync|" + password.trim()));
+  if (password) ls.set(SYNC_KEY(), sha256("drayman-family-sync|" + password.trim()));
   if (!FIREBASE_DB_URL || typeof EventSource === "undefined") { setStatus("local"); return; }
-  const key = ls.get(SYNC_KEY);
+  const key = ls.get(SYNC_KEY());
   if (!key) { setStatus("local"); return; }
   const path = `families/${key}`;
   if (path === familyPath && source && source.readyState !== 2) return;
@@ -208,7 +223,7 @@ export function startSync(password) {
   connect();
 }
 
-export const hasSyncKey = () => !!ls.get(SYNC_KEY);
+export const hasSyncKey = () => !!ls.get(SYNC_KEY());
 
 // Everything is already on the phone; this pushes what the family copy hasn't got yet.
 export const flushNow = () => flush(true);
@@ -217,20 +232,20 @@ if (typeof window !== "undefined") {
   window.addEventListener("online", () => { if (familyPath) { connect(); flush(); } });
   window.addEventListener("offline", () => { if (familyPath) setStatus("offline"); });
   // Another tab on the same phone changed something.
-  window.addEventListener("storage", (e) => { if (e.key && e.key.startsWith("family-shopping-list-") && e.key !== MEMBER_NAME_KEY) notify([e.key], null); });
+  window.addEventListener("storage", (e) => { const k = familyKeyOf(e.key); if (k) notify([k], null); });
 
   // Replaces Claude.ai's storage outside Claude.ai (Claude.ai keeps its own).
   if (!window.storage) {
     window.storage = {
       async get(key, shared) {
         if (shared) sharedKeys[key] = true;
-        const value = ls.get(key);
+        const value = fs.get(key);
         if (value === null) throw new Error("not found: " + key);
         return { key, value };
       },
       async set(key, value, shared) {
-        const same = ls.get(key) === value;
-        ls.set(key, value);
+        const same = fs.get(key) === value;
+        fs.set(key, value);
         if (shared && !same) {
           sharedKeys[key] = true;
           const pending = readPending();
