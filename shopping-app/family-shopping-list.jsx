@@ -921,7 +921,8 @@ export default function ShoppingList() {
   };
 
   // Saves the current list. Repeated saves of the same list update one entry
-  // (keeping its creation date) until "רשימה חדשה" is pressed.
+  // until "רשימה חדשה" is pressed; the entry keeps when it was first saved and
+  // records when it was last updated, and is shown and sorted by that last date.
   const saveCurrentList = () => {
     if (finalItems.length === 0) return false;
     const snapshot = finalItems.map((it) => ({
@@ -933,7 +934,8 @@ export default function ShoppingList() {
     }));
     const existing = currentListId ? savedLists.find((l) => l.id === currentListId) : null;
     if (existing) {
-      persistSaved(savedLists.map((l) => (l.id === existing.id ? { ...l, items: snapshot } : l)));
+      const now = new Date().toISOString();
+      persistSaved(savedLists.map((l) => (l.id === existing.id ? { ...l, items: snapshot, updatedAt: now } : l)));
     } else {
       const entry = {
         id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -1026,8 +1028,11 @@ export default function ShoppingList() {
   const localDay = (iso) => new Date(iso).toLocaleDateString("sv-SE");
   const formatSavedAt = (iso) =>
     new Date(iso).toLocaleString("he-IL", { dateStyle: "short", timeStyle: "short" });
-  const sortedSaved = savedLists.slice().sort((a, b) => new Date(b.savedAt) - new Date(a.savedAt));
-  const visibleSaved = searchDate ? sortedSaved.filter((l) => localDay(l.savedAt) === searchDate) : sortedSaved;
+  const lastSaved = (l) => l.updatedAt || l.savedAt;
+  const sortedSaved = savedLists.slice().sort((a, b) => new Date(lastSaved(b)) - new Date(lastSaved(a)));
+  const visibleSaved = searchDate
+    ? sortedSaved.filter((l) => localDay(lastSaved(l)) === searchDate || localDay(l.savedAt) === searchDate)
+    : sortedSaved;
 
   const buildEmailBody = () => {
     const lines = finalItems.map((it) =>
@@ -1894,7 +1899,12 @@ export default function ShoppingList() {
               return (
                 <div key={l.id} style={styles.savedCard}>
                   <button onClick={() => setOpenSavedId(open ? null : l.id)} style={styles.savedHeader}>
-                    <span style={styles.savedDate}>{formatSavedAt(l.savedAt)}</span>
+                    <span style={styles.savedDate}>
+                      {formatSavedAt(lastSaved(l))}
+                      {l.updatedAt && localDay(l.updatedAt) !== localDay(l.savedAt) && (
+                        <span style={{ display: "block", fontSize: "0.75em", opacity: 0.7 }}>נפתחה {formatSavedAt(l.savedAt)}</span>
+                      )}
+                    </span>
                     <span style={styles.savedCount}>{l.items.length} מוצרים</span>
                   </button>
                   {open && (
