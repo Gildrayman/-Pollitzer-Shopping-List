@@ -35,15 +35,16 @@ export const FAMILIES = {
     keyPrefix: "eshel/",
     passkeyKey: "eshel/passkey-id",
     passkeyDeclinedKey: "eshel/passkey-declined",
-    // Until the Eshel family's own details are given, nothing of the Drayman
-    // family's appears: no recipient is filled in, and the header is the family name.
-    // The Eshel family doesn't send orders by email for now (Gil, 2026-10-31):
-    // no mail button and no voice command for it; WhatsApp stays.
-    mailEnabled: false,
+    // Orders go to the same store as before. Nothing of the Drayman family appears:
+    // the header is the family name plus the family's own email, typed once and kept.
+    mailEnabled: true,
     order: {
-      email: "",
+      email: "karkur@politzer.co.il",
       header: ["משפחת אשל"],
       subject: "משפחת אשל",
+      // The family's own address gets a hidden copy (bcc) of each order.
+      // It is asked once, on the first send, and kept for the whole family.
+      askCopyEmail: true,
     },
   },
 };

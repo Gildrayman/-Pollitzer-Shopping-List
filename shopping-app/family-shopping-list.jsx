@@ -165,6 +165,7 @@ const NOTES_KEY = "family-shopping-list-note-overrides";
 const NAMES_KEY = "family-shopping-list-name-overrides";
 const CURRENT_KEY = "family-shopping-list-current-saved-id";
 const HIDDEN_KEY = "family-shopping-list-hidden-products";
+const COPY_EMAIL_KEY = "family-shopping-list-copy-email";
 
 export function greetingForHour(h) {
   if (h >= 5 && h < 12) return "בוקר טוב";
@@ -417,7 +418,20 @@ export default function ShoppingList() {
   const [finalCustomText, setFinalCustomText] = useState("");
   const [mailFailed, setMailFailed] = useState(false);
   // Sending mail asks first for a confirmation, then for the family password.
-  const [mailStep, setMailStep] = useState(null); // "confirm" | "password" | "ready"
+  const [mailStep, setMailStep] = useState(null); // "email" | "confirm" | "password" | "ready"
+  // The family's own address for a hidden copy of each order (asked once, shared by the family).
+  const [copyEmail, setCopyEmail] = useState("");
+  const [copyEmailDraft, setCopyEmailDraft] = useState("");
+  useEffect(() => {
+    if (!currentFamily().order.askCopyEmail) return;
+    const load = async () => {
+      try { const res = await window.storage.get(COPY_EMAIL_KEY, true); if (res && res.value) setCopyEmail(res.value); } catch {}
+    };
+    load();
+    const onSync = (e) => { if (e.detail && e.detail.keys && e.detail.keys.includes(COPY_EMAIL_KEY)) load(); };
+    window.addEventListener("family-sync", onSync);
+    return () => window.removeEventListener("family-sync", onSync);
+  }, []);
   // Face ID / fingerprint can replace the send password on a phone where it was turned on.
   const [faceSend, setFaceSend] = useState(false);
   const [faceSendBusy, setFaceSendBusy] = useState(false);
@@ -1021,13 +1035,16 @@ export default function ShoppingList() {
     // Plain-text mail has no alignment setting; a right-to-left mark at the start
     // of each line makes mail apps lay the Hebrew lines out from the right.
     const RLM = "\u200f";
-    return [...currentFamily().order.header, "", "", ...lines]
+    const fam = currentFamily();
+    const head = [...fam.order.header, ...(fam.order.askCopyEmail && copyEmail ? [copyEmail] : [])];
+    return [...head, "", "", ...lines]
       .map((line) => (line ? RLM + line : line))
       .join("\n");
   };
 
   const emailSubject = currentFamily().order.subject;
-  const mailtoHref = `mailto:${currentFamily().order.email}?subject=${encodeURIComponent(emailSubject)}&body=${encodeURIComponent(buildEmailBody())}`;
+  const bccPart = currentFamily().order.askCopyEmail && copyEmail ? `&bcc=${encodeURIComponent(copyEmail)}` : "";
+  const mailtoHref = `mailto:${currentFamily().order.email}?subject=${encodeURIComponent(emailSubject)}${bccPart}&body=${encodeURIComponent(buildEmailBody())}`;
   const whatsappHref = `https://wa.me/?text=${encodeURIComponent(buildEmailBody())}`;
 
   // Opens the phone's mail app with recipient, subject and body filled in (nothing is sent automatically).
@@ -1091,9 +1108,24 @@ export default function ShoppingList() {
     }, 1500);
   };
 
-  const askSendMail = () => {
+  const askSendMail = async () => {
     setMailPw("");
     setMailPwError("");
+    if (currentFamily().order.askCopyEmail) {
+      let saved = "";
+      try { const res = await window.storage.get(COPY_EMAIL_KEY, true); saved = res && res.value ? res.value : ""; } catch {}
+      setCopyEmail(saved);
+      if (!saved) { setCopyEmailDraft(""); setMailStep("email"); return; }
+    }
+    setMailStep("confirm");
+  };
+
+  const saveCopyEmail = async () => {
+    const v = copyEmailDraft.trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) { setMailPwError("כתובת המייל לא נראית תקינה. בדקו ונסו שוב."); return; }
+    setMailPwError("");
+    setCopyEmail(v);
+    try { await window.storage.set(COPY_EMAIL_KEY, v, true); } catch {}
     setMailStep("confirm");
   };
 
@@ -1604,8 +1636,14 @@ export default function ShoppingList() {
             setMailPw("");
             setMailPwError("");
             mailStepSpokenRef.current = true;
-            setMailStep("password");
-            reply(`${heard} כדי לשלוח, הקלידו את סיסמת השליחה ולחצו על הכפתור שלח.`, { keepListening: false });
+            if (currentFamily().order.askCopyEmail && !copyEmail) {
+              setCopyEmailDraft("");
+              setMailStep("email");
+              reply(`${heard} בפעם הראשונה, הקלידו את כתובת המייל שלכם ולחצו על שמירה והמשך.`, { keepListening: false });
+            } else {
+              setMailStep("password");
+              reply(`${heard} כדי לשלוח, הקלידו את סיסמת השליחה ולחצו על הכפתור שלח.`, { keepListening: false });
+            }
             voiceOnRef.current = false;
             setVoiceOn(false);
           } else {
@@ -1764,6 +1802,7 @@ export default function ShoppingList() {
   useEffect(() => {
     if (mailStepSpokenRef.current) { mailStepSpokenRef.current = false; return; }
     if (mailStep === "confirm") sayShown("לשלוח את הרשימה במייל למכולת? יש כפתור כן, להמשיך, וכפתור ביטול.");
+    else if (mailStep === "email") sayShown("בפעם הראשונה, הקלידו את כתובת המייל שלכם ולחצו על שמירה והמשך.");
     else if (mailStep === "password") sayShown("הקלידו את סיסמת השליחה ולחצו על הכפתור שלח.");
     else if (mailStep === "ready") sayShown("זוהית. לחצו על הכפתור פתיחת המייל.");
   }, [mailStep]);
@@ -2363,15 +2402,40 @@ export default function ShoppingList() {
           <div style={styles.sheet} onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="mail-step-title">
             <div style={styles.sheetHeader}>
               <h3 id="mail-step-title" style={styles.sheetTitle}>
-                {mailStep === "confirm" ? "לשלוח את הרשימה במייל?" : mailStep === "ready" ? "זוהית ✓" : "סיסמת שליחה"}
+                {mailStep === "email" ? "המייל שלכם" : mailStep === "confirm" ? "לשלוח את הרשימה במייל?" : mailStep === "ready" ? "זוהית ✓" : "סיסמת שליחה"}
               </h3>
               <button onClick={closeMailStep} style={styles.sheetClose} aria-label="ביטול">
                 <X size={20} />
               </button>
             </div>
-            {mailStep === "confirm" ? (
+            {mailStep === "email" ? (
+              <div>
+                <label htmlFor="copy-email" style={styles.mailStepText}>פעם ראשונה בלבד: הקלידו את כתובת המייל שלכם. היא תופיע בראש ההזמנה, וכל הזמנה תישלח גם אליכם כעותק. הכתובת נשמרת לפעמים הבאות.</label>
+                <input
+                  id="copy-email"
+                  type="email"
+                  inputMode="email"
+                  autoComplete="email"
+                  placeholder="name@example.com"
+                  value={copyEmailDraft}
+                  onChange={(e) => { setCopyEmailDraft(e.target.value); setMailPwError(""); }}
+                  onKeyDown={(e) => { if (e.key === "Enter") saveCopyEmail(); }}
+                  style={{ ...styles.newProdInput, marginTop: 8, boxSizing: "border-box", direction: "ltr", textAlign: "left" }}
+                  autoFocus
+                />
+                {mailPwError && <p role="alert" style={styles.mailStepError}>{mailPwError}</p>}
+                <div style={styles.mailStepBtns}>
+                  <button type="button" onClick={saveCopyEmail} disabled={!copyEmailDraft.trim()} className="chalk-btn" style={{ ...styles.confirmBtn, flex: 1 }}>
+                    שמירה והמשך
+                  </button>
+                  <button type="button" onClick={closeMailStep} className="chalk-btn" style={{ ...styles.confirmBtn, ...styles.mailStepCancel, flex: 1 }}>
+                    ביטול
+                  </button>
+                </div>
+              </div>
+            ) : mailStep === "confirm" ? (
               <>
-                <p style={styles.mailStepText}>הרשימה ({finalItems.length} מוצרים) {currentFamily().order.email ? `תישלח ל-${currentFamily().order.email}` : "תיפתח באפליקציית המייל, ושם בוחרים למי לשלוח"}</p>
+                <p style={styles.mailStepText}>הרשימה ({finalItems.length} מוצרים) {currentFamily().order.email ? `תישלח ל-${currentFamily().order.email}` : "תיפתח באפליקציית המייל, ושם בוחרים למי לשלוח"}{currentFamily().order.askCopyEmail && copyEmail ? `. עותק יישלח ל-${copyEmail}` : ""}</p>
                 <div style={styles.mailStepBtns}>
                   <button onClick={() => setMailStep("password")} className="chalk-btn" style={{ ...styles.confirmBtn, flex: 1 }} autoFocus>
                     כן, להמשיך
