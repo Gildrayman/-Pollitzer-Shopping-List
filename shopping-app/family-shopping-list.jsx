@@ -1694,7 +1694,7 @@ export default function ShoppingList() {
       case "summary":
         setShowSaved(false);
         setShowFinal(true);
-        reply(`${heard} עברתי לסיכום. ${listSummary()} כדי לשלוח אמרו: שלח במייל.`);
+        reply(`${heard} עברתי לסיכום. ${listSummary()} כדי לשלוח אמרו: ${currentFamily().mailEnabled ? "שלח במייל" : "שלח בוואטסאפ"}.`);
         return;
       case "back":
         setShowSaved(false);
@@ -1711,6 +1711,7 @@ export default function ShoppingList() {
         return;
       case "send_mail":
       case "send_whatsapp": {
+        if (cmd.type === "send_mail" && !currentFamily().mailEnabled) { reply(`${heard} שליחה במייל לא פעילה אצלכם. אפשר לומר: שלח בוואטסאפ.`); return; }
         if (finalItems.length === 0) { reply(`${heard} הרשימה ריקה, אין מה לשלוח.`); return; }
         pendingRef.current = { kind: "confirm", action: cmd.type };
         const where = cmd.type === "send_mail" ? "במייל למכולת" : "בוואטסאפ";
@@ -2166,6 +2167,7 @@ export default function ShoppingList() {
               <MessageCircle size={16} style={{ marginInlineEnd: 6, verticalAlign: "-3px" }} />
               שתף בווצאפ
             </a>
+            {currentFamily().mailEnabled && (
             <button
               onClick={askSendMail}
               className="chalk-btn final-top-btn"
@@ -2174,6 +2176,7 @@ export default function ShoppingList() {
               <Send size={16} style={{ marginInlineEnd: 6, verticalAlign: "-3px" }} />
               שלח במייל
             </button>
+            )}
           </div>
 
           {mailCopied && !mailFailed && (

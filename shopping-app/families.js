@@ -13,6 +13,7 @@ export const FAMILIES = {
     passwordHash: "4d3c81d0207371f8835c36ac47b14d3a7582a537acc3095b0ec88e8aa74dfd2e",
     sendPasswordHash: "4d3c81d0207371f8835c36ac47b14d3a7582a537acc3095b0ec88e8aa74dfd2e",
     name: "משפחת דריימן",
+    mailEnabled: true,
     members: [],
     namePlaceholder: "למשל: גיל",
     keyPrefix: "",
@@ -36,6 +37,9 @@ export const FAMILIES = {
     passkeyDeclinedKey: "eshel/passkey-declined",
     // Until the Eshel family's own details are given, nothing of the Drayman
     // family's appears: no recipient is filled in, and the header is the family name.
+    // The Eshel family doesn't send orders by email for now (Gil, 2026-10-31):
+    // no mail button and no voice command for it; WhatsApp stays.
+    mailEnabled: false,
     order: {
       email: "",
       header: ["משפחת אשל"],
