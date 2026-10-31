@@ -40,6 +40,9 @@ export const FAMILIES = {
       email: "",
       header: ["משפחת אשל"],
       subject: "משפחת אשל",
+      // The family's own address gets a hidden copy (bcc) of each order.
+      // It is asked once, on the first send, and kept for the whole family.
+      askCopyEmail: true,
     },
   },
 };
