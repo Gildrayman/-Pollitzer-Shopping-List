@@ -41,8 +41,26 @@ const BUILD = typeof __BUILD__ !== "undefined" ? __BUILD__ : "dev";
   }
 })();
 
+// If something breaks, say so on the screen instead of showing a blank page.
+class ErrorScreen extends React.Component {
+  constructor(props) { super(props); this.state = { error: null }; }
+  static getDerivedStateFromError(error) { return { error }; }
+  render() {
+    if (!this.state.error) return this.props.children;
+    return (
+      <div dir="rtl" style={{ padding: 24, fontFamily: "sans-serif", textAlign: "center" }}>
+        <p style={{ fontSize: "1.1rem", fontWeight: 700 }}>משהו השתבש. הרשימה שמורה, נסו לפתוח שוב.</p>
+        <button type="button" onClick={() => location.reload()} style={{ padding: "10px 18px", fontSize: "1rem" }}>לפתוח שוב</button>
+        <p style={{ color: "#888", fontSize: "0.8rem", direction: "ltr" }}>{String(this.state.error && this.state.error.message)}</p>
+      </div>
+    );
+  }
+}
+
 createRoot(document.getElementById("root")).render(
-  <PasswordGate>
-    <ShoppingList />
-  </PasswordGate>
+  <ErrorScreen>
+    <PasswordGate>
+      <ShoppingList />
+    </PasswordGate>
+  </ErrorScreen>
 );

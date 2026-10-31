@@ -153,8 +153,9 @@ export default function PasswordGate({ children }) {
 
   const canSubmit = !!value.trim();
 
+  // No real form: some previews (like inside Claude) block form sending.
   const submit = async (e) => {
-    e.preventDefault();
+    if (e && e.preventDefault) e.preventDefault();
     if (!canSubmit) return;
     const f = familyForPassword(value);
     if (f) {
@@ -191,7 +192,7 @@ export default function PasswordGate({ children }) {
     const members = currentFamily().members;
     return (
       <div dir="rtl" style={styles.page}>
-        <form onSubmit={(e) => { e.preventDefault(); saveName(nameDraft); }} style={styles.card}>
+        <div style={styles.card}>
           <h1 style={styles.title}>ברוכים הבאים ל{currentFamily().name}</h1>
           <p style={styles.sub}>{members.length ? "מי את/ה?" : "איך קוראים לך?"} נשאל רק בפעם הראשונה בטלפון הזה.</p>
           {members.length > 0 && (
@@ -209,12 +210,13 @@ export default function PasswordGate({ children }) {
             placeholder={currentFamily().namePlaceholder}
             value={nameDraft}
             onChange={(e) => setNameDraft(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); saveName(nameDraft); } }}
             style={{ ...styles.input, direction: "rtl", textAlign: "right" }}
           />
-          <button type="submit" disabled={!nameDraft.trim()} style={{ ...styles.button, opacity: nameDraft.trim() ? 1 : 0.5 }}>
+          <button type="button" onClick={() => saveName(nameDraft)} disabled={!nameDraft.trim()} style={{ ...styles.button, opacity: nameDraft.trim() ? 1 : 0.5 }}>
             המשך
           </button>
-        </form>
+        </div>
       </div>
     );
   }
@@ -222,7 +224,7 @@ export default function PasswordGate({ children }) {
   return (
     <div dir="rtl" style={styles.page}>
       <style>{"@import url('https://fonts.googleapis.com/css2?family=Suez+One&family=Heebo:wght@400;600;700&display=swap');"}</style>
-      <form onSubmit={submit} style={styles.card}>
+      <div style={styles.card}>
         <h1 style={styles.title}>{family ? `קניות ${family.name}` : "רשימת קניות משפחתית"}</h1>
         {family && savedName ? (
           <p style={styles.greet}>{greetingForHour(new Date().getHours())}, {savedName}</p>
@@ -244,10 +246,11 @@ export default function PasswordGate({ children }) {
           autoComplete="current-password"
           value={value}
           onChange={(e) => { setValue(e.target.value); setError(""); }}
+          onKeyDown={(e) => { if (e.key === "Enter") submit(e); }}
           style={styles.input}
         />
         {error && <p role="alert" style={styles.error}>{error}</p>}
-        <button type="submit" disabled={!canSubmit} style={{ ...styles.button, opacity: canSubmit ? 1 : 0.5 }}>
+        <button type="button" onClick={submit} disabled={!canSubmit} style={{ ...styles.button, opacity: canSubmit ? 1 : 0.5 }}>
           כניסה
         </button>
         {family && faceSupported && !faceReady && faceLoginDeclined() && (
@@ -256,7 +259,7 @@ export default function PasswordGate({ children }) {
           </button>
         )}
         {faceNote && <p style={styles.hint}>{faceNote}</p>}
-      </form>
+      </div>
     </div>
   );
 }

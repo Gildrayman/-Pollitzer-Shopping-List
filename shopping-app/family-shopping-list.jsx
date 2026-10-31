@@ -2350,20 +2350,21 @@ export default function ShoppingList() {
                 </div>
               </>
             ) : (
-              <form onSubmit={submitMailPassword}>
+              <div>
                 <label htmlFor="mail-pw" style={styles.mailStepText}>הקלידו את סיסמת השליחה</label>
                 <input
                   id="mail-pw"
                   type="password"
                   value={mailPw}
                   onChange={(e) => { setMailPw(e.target.value); setMailPwError(""); }}
+                  onKeyDown={(e) => { if (e.key === "Enter" && mailPw) submitMailPassword(e); }}
                   style={{ ...styles.newProdInput, marginTop: 8, boxSizing: "border-box" }}
                   autoComplete="off"
                   autoFocus
                 />
                 {mailPwError && <p role="alert" style={styles.mailStepError}>{mailPwError}</p>}
                 <div style={styles.mailStepBtns}>
-                  <button type="submit" className="chalk-btn" style={{ ...styles.confirmBtn, flex: 1 }} disabled={!mailPw}>
+                  <button type="button" onClick={submitMailPassword} className="chalk-btn" style={{ ...styles.confirmBtn, flex: 1 }} disabled={!mailPw}>
                     <Send size={16} style={{ marginInlineEnd: 6, verticalAlign: "-3px" }} />
                     שלח
                   </button>
@@ -2371,7 +2372,7 @@ export default function ShoppingList() {
                     ביטול
                   </button>
                 </div>
-              </form>
+              </div>
             )}
           </div>
         </div>

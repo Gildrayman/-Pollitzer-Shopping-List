@@ -237,7 +237,7 @@ if (typeof window !== "undefined") {
   // The app always keeps its data this way, also inside Claude.ai, so each
   // family's data stays apart and the login never waits on another store.
   {
-    window.storage = {
+    const store = {
       async get(key, shared) {
         if (shared) sharedKeys[key] = true;
         const value = fs.get(key);
@@ -257,5 +257,10 @@ if (typeof window !== "undefined") {
         return { key, value };
       },
     };
+    try {
+      Object.defineProperty(window, "storage", { value: store, writable: true, configurable: true });
+    } catch {
+      try { window.storage = store; } catch {}
+    }
   }
 }

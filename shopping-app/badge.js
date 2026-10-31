@@ -17,8 +17,11 @@ export const badgePromptDone = () => !!ls.get(PROMPT_KEY);
 export const markBadgePromptDone = () => ls.set(PROMPT_KEY, "1");
 
 export function registerServiceWorker() {
-  if (!("serviceWorker" in navigator) || !window.isSecureContext) return;
-  navigator.serviceWorker.register("sw.js").catch(() => {});
+  // Some previews (like inside Claude) forbid service workers; the app runs without one.
+  try {
+    if (!("serviceWorker" in navigator) || !window.isSecureContext) return;
+    navigator.serviceWorker.register("sw.js").catch(() => {});
+  } catch {}
 }
 
 // Must run from a tap (iPhone asks only then).
