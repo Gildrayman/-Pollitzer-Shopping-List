@@ -459,6 +459,8 @@ export default function ShoppingList() {
   const [savedLists, setSavedLists] = useState([]);
   const [searchDate, setSearchDate] = useState("");
   const [openSavedId, setOpenSavedId] = useState(null);
+  // Deleting a saved list asks once more on the same card, so a slip of the finger can't erase it.
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const [saveMsg, setSaveMsg] = useState("");
   const [currentListId, setCurrentListId] = useState(null);
 
@@ -1914,17 +1916,31 @@ export default function ShoppingList() {
                           {formatListLine({ qty: s.qty, kg: s.kg || 0, name: s.name, note: s.note })}
                         </div>
                       ))}
-                      <div style={styles.savedActions}>
+                    </div>
+                  )}
+                  <div style={{ ...styles.savedActions, padding: "0 8px 12px", marginTop: open ? 0 : 2 }}>
+                    {confirmDeleteId === l.id ? (
+                      <>
+                        <button onClick={() => { deleteSaved(l.id); setConfirmDeleteId(null); }} className="chalk-btn" style={{ ...styles.finalTopBtn, color: "#A33A31", borderColor: "#A33A31" }}>
+                          <Trash2 size={16} style={{ marginInlineEnd: 6, verticalAlign: "-3px" }} />
+                          כן, למחוק
+                        </button>
+                        <button onClick={() => setConfirmDeleteId(null)} className="chalk-btn" style={styles.finalTopBtn}>
+                          ביטול
+                        </button>
+                      </>
+                    ) : (
+                      <>
                         <button onClick={() => loadSaved(l)} className="chalk-btn" style={{ ...styles.finalTopBtn, ...styles.finalSendBtn }}>
                           הוסף לרשימה הנוכחית
                         </button>
-                        <button onClick={() => deleteSaved(l.id)} className="chalk-btn" style={styles.finalTopBtn} aria-label="מחק רשימה שמורה">
+                        <button onClick={() => setConfirmDeleteId(l.id)} className="chalk-btn" style={styles.finalTopBtn} aria-label="מחק רשימה שמורה">
                           <Trash2 size={16} style={{ marginInlineEnd: 6, verticalAlign: "-3px" }} />
                           מחק
                         </button>
-                      </div>
-                    </div>
-                  )}
+                      </>
+                    )}
+                  </div>
                 </div>
               );
             })}
