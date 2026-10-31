@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { Plus, Check, ShoppingBasket, X, Users, Upload, FileText, Eye, ArrowRight, Send, MessageCircle, Save, History, Trash2, Mic } from "lucide-react";
+import { Plus, Check, ShoppingBasket, X, Users, Upload, FileText, Eye, ArrowRight, Send, MessageCircle, Save, History, Trash2, Mic, ScanFace } from "lucide-react";
 import { isSendPassword, currentFamily } from "./families.js";
 import { trace } from "./debug.js";
+import { faceLoginSupported, hasFaceLogin, faceLogin } from "./passkey.js";
 import { getSyncStatus } from "./sync.js";
 import { isInstalled, isIOS, notifyPermission, badgePromptDone, markBadgePromptDone, enableBadge } from "./badge.js";
 import { speakHe, stopSpeaking, primeSpeech, onSpeechStatus, micTone, MIC_HELP } from "./speech.js";
@@ -416,7 +417,14 @@ export default function ShoppingList() {
   const [finalCustomText, setFinalCustomText] = useState("");
   const [mailFailed, setMailFailed] = useState(false);
   // Sending mail asks first for a confirmation, then for the family password.
-  const [mailStep, setMailStep] = useState(null); // "confirm" | "password"
+  const [mailStep, setMailStep] = useState(null); // "confirm" | "password" | "ready"
+  // Face ID / fingerprint can replace the send password on a phone where it was turned on.
+  const [faceSend, setFaceSend] = useState(false);
+  const [faceSendBusy, setFaceSendBusy] = useState(false);
+  useEffect(() => {
+    if (!hasFaceLogin()) return;
+    faceLoginSupported().then((ok) => setFaceSend(ok && hasFaceLogin()));
+  }, []);
   const [mailPw, setMailPw] = useState("");
   const [mailPwError, setMailPwError] = useState("");
   const mailStepSpokenRef = useRef(false);
@@ -1107,6 +1115,24 @@ export default function ShoppingList() {
     openMail();
   };
 
+  // After the face is confirmed, one more tap opens the mail app (phones open it only from a tap).
+  const sendWithFace = async () => {
+    setMailPwError("");
+    setFaceSendBusy(true);
+    try {
+      if (await faceLogin()) {
+        setMailPw("");
+        setMailStep("ready");
+      } else {
+        setMailPwError("זיהוי הפנים לא הצליח. נסו שוב או הקלידו סיסמה.");
+      }
+    } catch (e) {
+      setMailPwError("זיהוי הפנים בוטל או לא הצליח. נסו שוב או הקלידו סיסמה.");
+    } finally {
+      setFaceSendBusy(false);
+    }
+  };
+
   const copyMailText = async () => {
     const text = buildEmailBody();
     let ok = copyRich(text);
@@ -1738,6 +1764,7 @@ export default function ShoppingList() {
     if (mailStepSpokenRef.current) { mailStepSpokenRef.current = false; return; }
     if (mailStep === "confirm") sayShown("לשלוח את הרשימה במייל למכולת? יש כפתור כן, להמשיך, וכפתור ביטול.");
     else if (mailStep === "password") sayShown("הקלידו את סיסמת השליחה ולחצו על הכפתור שלח.");
+    else if (mailStep === "ready") sayShown("זוהית. לחצו על הכפתור פתיחת המייל.");
   }, [mailStep]);
   useEffect(() => { sayShown(mailPwError); }, [mailPwError]);
   useEffect(() => { sayShown(copyMsg); }, [copyMsg]);
@@ -2333,7 +2360,7 @@ export default function ShoppingList() {
           <div style={styles.sheet} onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="mail-step-title">
             <div style={styles.sheetHeader}>
               <h3 id="mail-step-title" style={styles.sheetTitle}>
-                {mailStep === "confirm" ? "לשלוח את הרשימה במייל?" : "סיסמת שליחה"}
+                {mailStep === "confirm" ? "לשלוח את הרשימה במייל?" : mailStep === "ready" ? "זוהית ✓" : "סיסמת שליחה"}
               </h3>
               <button onClick={closeMailStep} style={styles.sheetClose} aria-label="ביטול">
                 <X size={20} />
@@ -2351,8 +2378,30 @@ export default function ShoppingList() {
                   </button>
                 </div>
               </>
+            ) : mailStep === "ready" ? (
+              <>
+                <p style={styles.mailStepText}>לחצו כדי לפתוח את המייל עם הרשימה.</p>
+                <div style={styles.mailStepBtns}>
+                  <button type="button" onClick={() => { closeMailStep(); openMail(); }} className="chalk-btn" style={{ ...styles.confirmBtn, flex: 1 }} autoFocus>
+                    <Send size={16} style={{ marginInlineEnd: 6, verticalAlign: "-3px" }} />
+                    פתיחת המייל
+                  </button>
+                  <button type="button" onClick={closeMailStep} className="chalk-btn" style={{ ...styles.confirmBtn, ...styles.mailStepCancel, flex: 1 }}>
+                    ביטול
+                  </button>
+                </div>
+              </>
             ) : (
               <div>
+                {faceSend && (
+                  <>
+                    <button type="button" onClick={sendWithFace} disabled={faceSendBusy} className="chalk-btn" style={{ ...styles.confirmBtn, width: "100%", marginBottom: 10, opacity: faceSendBusy ? 0.6 : 1 }}>
+                      <ScanFace size={18} style={{ marginInlineEnd: 6, verticalAlign: "-4px" }} />
+                      שליחה עם זיהוי פנים
+                    </button>
+                    <p style={{ ...styles.mailStepText, margin: "0 0 6px", fontSize: "0.85rem" }}>או עם סיסמה:</p>
+                  </>
+                )}
                 <label htmlFor="mail-pw" style={styles.mailStepText}>הקלידו את סיסמת השליחה</label>
                 <input
                   id="mail-pw"
@@ -2362,7 +2411,7 @@ export default function ShoppingList() {
                   onKeyDown={(e) => { if (e.key === "Enter" && mailPw) submitMailPassword(e); }}
                   style={{ ...styles.newProdInput, marginTop: 8, boxSizing: "border-box" }}
                   autoComplete="off"
-                  autoFocus
+                  autoFocus={!faceSend}
                 />
                 {mailPwError && <p role="alert" style={styles.mailStepError}>{mailPwError}</p>}
                 <div style={styles.mailStepBtns}>
