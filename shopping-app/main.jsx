@@ -4,6 +4,7 @@ import PasswordGate from "./password-gate.jsx";
 import ShoppingList from "./family-shopping-list.jsx";
 import { registerServiceWorker, startBadges } from "./badge.js";
 import { flushNow } from "./sync.js";
+import { trace } from "./debug.js";
 
 registerServiceWorker();
 startBadges();
@@ -44,7 +45,7 @@ const BUILD = typeof __BUILD__ !== "undefined" ? __BUILD__ : "dev";
 // If something breaks, say so on the screen instead of showing a blank page.
 class ErrorScreen extends React.Component {
   constructor(props) { super(props); this.state = { error: null }; }
-  static getDerivedStateFromError(error) { return { error }; }
+  static getDerivedStateFromError(error) { trace("CRASH " + (error && error.message)); return { error }; }
   render() {
     if (!this.state.error) return this.props.children;
     return (

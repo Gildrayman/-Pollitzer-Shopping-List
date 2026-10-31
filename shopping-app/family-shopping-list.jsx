@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { Plus, Check, ShoppingBasket, X, Users, Upload, FileText, Eye, ArrowRight, Send, MessageCircle, Save, History, Trash2, Mic } from "lucide-react";
 import { isSendPassword, currentFamily } from "./families.js";
+import { trace } from "./debug.js";
 import { getSyncStatus } from "./sync.js";
 import { isInstalled, isIOS, notifyPermission, badgePromptDone, markBadgePromptDone, enableBadge } from "./badge.js";
 import { speakHe, stopSpeaking, primeSpeech, onSpeechStatus, micTone, MIC_HELP } from "./speech.js";
@@ -472,6 +473,7 @@ export default function ShoppingList() {
   useEffect(() => {
     try {
       document.title = `קניות ${currentFamily().name}`;
+      trace("list shown, family=" + currentFamily().id);
     } catch (e) {
       // document not available in this environment — ignore
     }

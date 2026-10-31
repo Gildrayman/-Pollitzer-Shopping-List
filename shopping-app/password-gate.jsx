@@ -3,6 +3,7 @@ import { NAME_KEY, greetingForHour } from "./family-shopping-list.jsx";
 import { speakHe } from "./speech.js";
 import { familyForPassword, rememberedFamily, currentFamily, setFamily } from "./families.js";
 import { startSync } from "./sync.js";
+import { trace } from "./debug.js";
 import { ScanFace } from "lucide-react";
 import {
   faceLoginSupported, hasFaceLogin, faceLoginDeclined, declineFaceLogin, undeclineFaceLogin,
@@ -33,7 +34,8 @@ export default function PasswordGate({ children }) {
   const [askNameStep, setAskNameStep] = useState(null); // { password }
 
   useEffect(() => {
-    faceLoginSupported().then(setFaceSupported);
+    trace("gate shown, family=" + (rememberedFamily() ? rememberedFamily().id : "none"));
+    faceLoginSupported().then((v) => { trace("face supported=" + v); setFaceSupported(v); });
   }, []);
 
   useEffect(() => {
@@ -66,6 +68,7 @@ export default function PasswordGate({ children }) {
   if (unlocked) return <React.Fragment key={currentFamily().id}>{children}</React.Fragment>;
 
   const welcome = (who) => {
+    trace("welcome -> unlock");
     speakHe(`${greetingForHour(new Date().getHours())}${who ? `, ${who}` : ""}. לשליטה קולית, לחצו על כפתור המיקרופון בפינה השמאלית התחתונה של המסך.`);
     setUnlocked(true);
   };
@@ -142,7 +145,8 @@ export default function PasswordGate({ children }) {
 
   // Correct password and a known name: open the family's list.
   const enter = (password, who) => {
-    startSync(password);
+    trace(`enter family=${currentFamily().id} name=${who ? "yes" : "no"} face=${faceSupported}`);
+    try { startSync(password); } catch (e) { trace("startSync error " + e.message); }
     if (faceSupported && !hasFaceLogin() && !faceLoginDeclined()) {
       speakHe(`${greetingForHour(new Date().getHours())}${who ? `, ${who}` : ""}.`);
       setOfferFace(true);
@@ -156,14 +160,18 @@ export default function PasswordGate({ children }) {
   // No real form: some previews (like inside Claude) block form sending.
   const submit = async (e) => {
     if (e && e.preventDefault) e.preventDefault();
+    trace(`submit len=${value.trim().length}`);
     if (!canSubmit) return;
-    const f = familyForPassword(value);
+    let f = null;
+    try { f = familyForPassword(value); } catch (err) { trace("check error " + err.message); }
+    trace("family=" + (f ? f.id : "none"));
     if (f) {
       const password = value.trim();
       setFamily(f.id);
       setFamilyState(f);
       setFaceReady(hasFaceLogin());
       const who = await loadName();
+      trace("saved name=" + (who ? "yes" : "no"));
       setSavedName(who);
       if (!who) {
         setNameDraft("");
@@ -180,6 +188,7 @@ export default function PasswordGate({ children }) {
 
   const saveName = async (n) => {
     const name = String(n || "").trim();
+    trace("pick name");
     if (!name) return;
     window.storage.set(NAME_KEY, name, false).catch(() => {});
     setSavedName(name);
