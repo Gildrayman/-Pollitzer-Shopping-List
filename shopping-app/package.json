@@ -1,0 +1,11 @@
+{
+  "name": "family-shopping-app",
+  "private": true,
+  "description": "Build: npm install, then node build.mjs . ../index.html. Versions are pinned: newer lucide-react breaks the app.",
+  "devDependencies": {
+    "esbuild": "0.28.2",
+    "lucide-react": "0.263.1",
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  }
+}

@@ -657,7 +657,7 @@ export default function ShoppingList() {
       const old = before.get(name);
       if (!old || old.qty !== it.qty || (old.kg || 0) !== (it.kg || 0)) lines.push(`${speakItem(it)}.`);
     }
-    for (const name of before.keys()) if (!after.has(name)) lines.push(`${name} הוסר מהרשימה.`);
+    for (const name of before.keys()) if (!after.has(name)) lines.push(`הוסר מהרשימה: ${name}.`);
     if (!lines.length) return;
     const text = lines.length > 3 ? (after.size ? `הרשימה עודכנה. יש בה ${after.size} מוצרים.` : "הרשימה ריקה.") : lines.join(" ");
     // During voice control, pause the microphone so it doesn't hear the app, then listen again.
@@ -1525,7 +1525,7 @@ export default function ShoppingList() {
         pendingRef.current = { kind: "new_product", type, chunk: ch, name, rest };
         said.push(`לא מצאתי ${name} ברשימת המוצרים. להוסיף אותו כמוצר חדש? אמרו כן או לא.`);
       } else {
-        said.push(`${prettyHe(ch.query)} לא נמצא ברשימה.`);
+        said.push(`אין ${prettyHe(ch.query)} ברשימה.`);
         continue;
       }
       return { cur, waiting: true };
@@ -1577,7 +1577,7 @@ export default function ShoppingList() {
       const hit = catalogFor(c.id).find((p) => normHe(p.name) === normHe(name));
       if (hit) {
         pendingRef.current = { kind: "np_add", product: { name: hit.name, category: c.id } };
-        reply(`${hit.name} כבר קיים במחלקת ${catInfo(c.id).label}. להוסיף אותו לרשימת הקניות? אמרו כן או לא.`);
+        reply(`המוצר ${hit.name} כבר קיים במחלקת ${catInfo(c.id).label}. להוסיף אותו לרשימת הקניות? אמרו כן או לא.`);
         return;
       }
     }
@@ -1669,7 +1669,7 @@ export default function ShoppingList() {
           reply(r.say);
           return;
         }
-        if (cmd.type === "no") { reply(`בסדר. ${pending.product.name} נשאר במחלקה, ולא נוסף לרשימה.`); return; }
+        if (cmd.type === "no") { reply(`בסדר. המוצר ${pending.product.name} נשאר במחלקה, ולא נוסף לרשימה.`); return; }
       } else if (pending.kind === "confirm") {
         if (cmd.type === "yes") {
           if (pending.action === "new_list") {
@@ -1729,7 +1729,7 @@ export default function ShoppingList() {
           reply(`${heard} ברשימה יש: ${f.options.map((o) => speakItem(finalItems.find((x) => x.name.trim() === o.name))).join(", ")}.`);
         } else {
           const inCatalog = findProduct(cmd.query, voiceProducts()).match;
-          reply(`${heard} ${inCatalog ? inCatalog.name : prettyHe(cmd.query) || "המוצר הזה"} לא נמצא ברשימה. הכמות שלו אפס.`);
+          reply(`${heard} אין ${inCatalog ? inCatalog.name : prettyHe(cmd.query) || "את המוצר הזה"} ברשימה.`);
         }
         return;
       }

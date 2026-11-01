@@ -1,6 +1,8 @@
 // Voice control: turns a spoken Hebrew sentence into list actions, and applies them.
 // Pure functions only (no React, no browser APIs), so they can be tested on their own.
 
+import { isPluralHe } from "./hebrew-speech.js";
+
 const NUM_WORDS = {
   אחד: 1, אחת: 1, שניים: 2, שנים: 2, שתיים: 2, שתים: 2, שני: 2, שתי: 2, זוג: 2,
   שלוש: 3, שלושה: 3, ארבע: 4, ארבעה: 4, חמש: 5, חמישה: 5, שש: 6, שישה: 6,
@@ -307,10 +309,15 @@ export const withUnits = (it, n) => { const { kg, ...rest } = it; return { ...re
 
 // Says "3 עגבניות שרי" / "2 קילו שוק הודו". Like the written list, meat and fish
 // say one amount: the units when there are more units than kilos, otherwise the kilos.
+// In proper Hebrew a number comes before a plural noun ("3 עגבניות"), and a product with a
+// singular name is counted in units ("חלב, 2 יחידות"), not "2 חלב".
 export function speakItem(it) {
-  if (kgOf(it) > 0) return `${kgOf(it)} קילו ${it.name}`;
+  const name = String(it.name).trim();
+  const kg = kgOf(it);
+  if (kg > 0) return kg === 1 ? `קילו ${name}` : `${kg} קילו ${name}`;
   const q = unitsOf(it);
-  return q > 1 ? `${q} ${it.name}` : `${it.name}, יחידה אחת`;
+  if (q <= 1) return `${name}, יחידה אחת`;
+  return isPluralHe(name.split(/\s+/)[0]) ? `${q} ${name}` : `${name}, ${q} יחידות`;
 }
 
 // Applies one resolved add/remove/set/inc/dec op to the list.
@@ -328,16 +335,16 @@ export function applyOp(items, op, makeItem, { maxQty = 20, maxKg = 10, kgCatego
   const replace = (it) => items.map((x, i) => (i === idx ? it : x));
 
   if (op.type === "remove") {
-    if (!existing) return { next: items, say: `${name} לא נמצא ברשימה.` };
-    return { next: items.filter((_, i) => i !== idx), say: `הורדתי ${name} מהרשימה.` };
+    if (!existing) return { next: items, say: `אין ${name} ברשימה.` };
+    return { next: items.filter((_, i) => i !== idx), say: `הורדתי את ${name} מהרשימה.` };
   }
   // Meat and fish by weight: "תוסיף 2 קילו שוק" / "תוריד קילו שוק" change the kilos.
   if ((op.type === "inc" || op.type === "dec") && wantKg != null) {
     const sign = op.type === "inc" ? 1 : -1;
     const base = existing || makeItem(name, op.product.category, "0");
-    if (!existing && sign < 0) return { next: items, say: `${name} לא נמצא ברשימה.` };
+    if (!existing && sign < 0) return { next: items, say: `אין ${name} ברשימה.` };
     const kg = Math.min(maxKg, Math.max(0, kgOf(base) + sign * (wantKg || 1)));
-    if (kg === 0) return { next: items.filter((_, i) => i !== idx), say: `הורדתי ${name} מהרשימה.` };
+    if (kg === 0) return { next: items.filter((_, i) => i !== idx), say: `הורדתי את ${name} מהרשימה.` };
     const upd = withKg(base, kg);
     const next = existing ? replace(upd) : [upd, ...items];
     return { next, say: `${sign > 0 ? "הוספתי" : "הורדתי"}. עכשיו ${speakItem(upd)}.` };
@@ -345,15 +352,15 @@ export function applyOp(items, op, makeItem, { maxQty = 20, maxKg = 10, kgCatego
   if (op.type === "inc" || op.type === "dec") {
     const step = wantQty || 1;
     if (op.type === "dec") {
-      if (!existing) return { next: items, say: `${name} לא נמצא ברשימה.` };
+      if (!existing) return { next: items, say: `אין ${name} ברשימה.` };
       // A kilo item lowered by a plain number loses that many kilos.
       if (kgOf(existing) > 0) {
         const kg = kgOf(existing) - step;
-        if (kg <= 0) return { next: items.filter((_, i) => i !== idx), say: `הורדתי ${name} מהרשימה.` };
+        if (kg <= 0) return { next: items.filter((_, i) => i !== idx), say: `הורדתי את ${name} מהרשימה.` };
         return { next: replace(withKg(existing, kg)), say: `הורדתי. עכשיו ${speakItem(withKg(existing, kg))}.` };
       }
       const left = unitsOf(existing) - step;
-      if (left <= 0) return { next: items.filter((_, i) => i !== idx), say: `הורדתי ${name} מהרשימה.` };
+      if (left <= 0) return { next: items.filter((_, i) => i !== idx), say: `הורדתי את ${name} מהרשימה.` };
       return { next: replace(withUnits(existing, left)), say: `הורדתי. עכשיו ${speakItem(withUnits(existing, left))}.` };
     }
     if (!existing) {
@@ -367,11 +374,11 @@ export function applyOp(items, op, makeItem, { maxQty = 20, maxKg = 10, kgCatego
   }
   if (op.type === "set") {
     if (wantQty === 0 && wantKg == null) {
-      if (!existing) return { next: items, say: `${name} לא נמצא ברשימה.` };
-      return { next: items.filter((_, i) => i !== idx), say: `הורדתי ${name} מהרשימה.` };
+      if (!existing) return { next: items, say: `אין ${name} ברשימה.` };
+      return { next: items.filter((_, i) => i !== idx), say: `הורדתי את ${name} מהרשימה.` };
     }
     const base = existing || makeItem(name, op.product.category, "1");
-    if (wantKg === 0 && wantQty == null) return { next: existing ? items.filter((_, i) => i !== idx) : items, say: existing ? `הורדתי ${name} מהרשימה.` : `${name} לא נמצא ברשימה.` };
+    if (wantKg === 0 && wantQty == null) return { next: existing ? items.filter((_, i) => i !== idx) : items, say: existing ? `הורדתי את ${name} מהרשימה.` : `אין ${name} ברשימה.` };
     const upd = wantKg ? withKg(base, wantKg) : withUnits(base, clampQ(wantQty == null ? unitsOf(base) : wantQty) || 1);
     const next = existing ? replace(upd) : [upd, ...items];
     return { next, say: `עדכנתי: ${speakItem(upd)}.${kgNote}` };
@@ -392,7 +399,7 @@ export function applyOp(items, op, makeItem, { maxQty = 20, maxKg = 10, kgCatego
 
 export const VOICE_HELP =
   "אפשר לומר למשל: תוסיף 2 עגבניות שרי. או: 2 קילו שוק הודו. " +
-  "כדי לשנות כמות: תוסיף 3 עגבניות שרי, או תעלה 2 חלב, מוסיף לכמות שכבר יש. תוריד 2 חלב מחסיר. תשנה מלפפונים ל-4 קובע. " +
+  "כדי לשנות כמות: תוסיף 3 עגבניות שרי, או תעלה 2 מלפפונים, מוסיף לכמות שכבר יש. תוריד 2 מלפפונים, מחסיר. תשנה מלפפונים ל-4, קובע. " +
   "כדי למחוק מוצר: תמחק גבינה, או תבטל גבינה. " +
   "כדי לשמוע: מה ברשימה, או: מה יש בבשר ודגים, או: מה הכמות של עגבניות שרי. כדי להוסיף מוצר חדש למחלקה: מוצר חדש במבה למחלקת שונות. " +
   "כדי לעבור לשונית אומרים את שמה, למשל: בשר ודגים, או: מוצרי חלב. ועוד: מה יש כאן, סיכום, רשימות קודמות, מוצר חדש, ייבוא, חזור, שמור, רשימה חדשה, שלח במייל, שלח בוואטסאפ. " +
