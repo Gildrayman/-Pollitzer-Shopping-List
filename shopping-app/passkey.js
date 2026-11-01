@@ -30,6 +30,9 @@ const fromB64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
 export async function faceLoginSupported() {
   try {
     if (!window.isSecureContext || !window.PublicKeyCredential) return false;
+    // iPhones and iPads always have Face ID or Touch ID for web pages; some home-screen apps
+    // answer this check wrongly, so on them the Face ID button is always shown.
+    if (/iPhone|iPad|iPod/.test(navigator.userAgent)) return true;
     return await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
   } catch {
     return false;
@@ -52,7 +55,9 @@ export async function registerFaceLogin(name, credKey = CRED_KEY()) {
     publicKey: {
       challenge: randomBytes(32),
       rp: { name: credKey === ADMIN_CRED_KEY ? "קניות: מנהל" : `קניות ${currentFamily().name}` },
-      user: { id: randomBytes(16), name: name || "family", displayName: name || currentFamily().name },
+      // The owner (family or manager) is written in the Face ID itself, so the phone can tell
+      // whose it is even if the app's own note of it is gone.
+      user: { id: new TextEncoder().encode(credKey === ADMIN_CRED_KEY ? "admin" : `fam:${currentFamily().id}`), name: name || "family", displayName: name || currentFamily().name },
       pubKeyCredParams: [{ type: "public-key", alg: -7 }, { type: "public-key", alg: -257 }],
       authenticatorSelection: { authenticatorAttachment: "platform", userVerification: "required", residentKey: "preferred" },
       timeout: 60000,
@@ -87,8 +92,8 @@ export async function faceLogin(keys = [CRED_KEY()]) {
 
 export const adminFaceLogin = () => faceLogin([ADMIN_CRED_KEY]);
 // Sending an order: the family's Face ID, or the manager's on the manager's phone.
-export const hasSendFace = () => hasFaceLogin() || hasAdminFace();
-export const sendFaceLogin = () => faceLogin([CRED_KEY(), ADMIN_CRED_KEY]);
+export const hasSendFace = () => hasAnyFace();
+export const sendFaceLogin = async () => !!(await anyFaceLogin());
 
 // Every Face ID saved on this phone: each family's and the manager's.
 function allSavedFaces() {
@@ -105,12 +110,12 @@ export const hasAnyFace = () => allSavedFaces().length > 0;
 // So a phone that last opened another family still logs in to its own family with the face.
 export async function anyFaceLogin() {
   const saved = allSavedFaces();
-  if (!saved.length) return null;
+  // No list of allowed Face IDs: the phone offers every Face ID it keeps for this site
+  // (on iPhone these are passkeys in the Keychain), even ones the app lost its note of.
   const assertion = await navigator.credentials.get({
     signal: freshSignal(),
     publicKey: {
       challenge: randomBytes(32),
-      allowCredentials: saved.map((x) => ({ type: "public-key", id: fromB64(x.id), transports: ["internal", "hybrid"] })),
       userVerification: "required",
       timeout: 60000,
     },
@@ -119,5 +124,14 @@ export async function anyFaceLogin() {
   const flags = new Uint8Array(assertion.response.authenticatorData)[32];
   if ((flags & 0x04) === 0) return null;
   const got = toB64(assertion.rawId);
-  return saved.find((x) => x.id === got) || null;
+  const known = saved.find((x) => x.id === got);
+  if (known) return known;
+  // A Face ID the app had no note of: its owner is written in it (or, for an older one, it
+  // belongs to the family this phone opens), and the note is written again.
+  let owner = "";
+  try { owner = assertion.response.userHandle ? new TextDecoder().decode(assertion.response.userHandle) : ""; } catch {}
+  if (owner === "admin") { ls.set(ADMIN_CRED_KEY, got); return { kind: "admin", id: got }; }
+  const famId = owner.startsWith("fam:") && FAMILIES[owner.slice(4)] ? owner.slice(4) : currentFamily().id;
+  ls.set(FAMILIES[famId].passkeyKey, got);
+  return { kind: "family", familyId: famId, id: got };
 }

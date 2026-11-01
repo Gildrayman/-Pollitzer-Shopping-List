@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import { Plus, Check, ShoppingBasket, X, Users, Upload, FileText, Eye, ArrowRight, Send, MessageCircle, Save, History, Trash2, Mic, ScanFace, RotateCcw, LogOut } from "lucide-react";
 import { isSendPassword, currentFamily } from "./families.js";
 import { trace } from "./debug.js";
-import { faceLoginSupported, hasSendFace, sendFaceLogin } from "./passkey.js";
+import { faceLoginSupported, sendFaceLogin } from "./passkey.js";
 import { getSyncStatus, flushNow } from "./sync.js";
 import { readHistory, recordHistory } from "./history.js";
 import { isInstalled, isIOS, notifyPermission, badgePromptDone, markBadgePromptDone, enableBadge } from "./badge.js";
@@ -437,8 +437,7 @@ export default function ShoppingList() {
   const [faceSend, setFaceSend] = useState(false);
   const [faceSendBusy, setFaceSendBusy] = useState(false);
   useEffect(() => {
-    if (!hasSendFace()) return;
-    faceLoginSupported().then((ok) => setFaceSend(ok && hasSendFace()));
+    faceLoginSupported().then((ok) => setFaceSend(ok));
   }, []);
   const [mailPw, setMailPw] = useState("");
   const [mailPwError, setMailPwError] = useState("");

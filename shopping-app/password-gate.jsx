@@ -473,8 +473,8 @@ export default function PasswordGate({ children }) {
         {family && savedName ? (
           <p style={styles.greet}>{greetingForHour(new Date().getHours())}, {savedName}</p>
         ) : null}
-        <p style={styles.sub}>הכניסה למשפחה בלבד. {faceReady && faceSupported ? "היכנסו עם זיהוי פנים או הקלידו סיסמה." : "הקלידו את הסיסמה כדי להמשיך."}</p>
-        {faceReady && faceSupported && (
+        <p style={styles.sub}>הכניסה למשפחה בלבד. {faceSupported ? "היכנסו עם זיהוי פנים או הקלידו סיסמה." : "הקלידו את הסיסמה כדי להמשיך."}</p>
+        {faceSupported && (
           <>
             <button type="button" onClick={() => loginWithFace(false)} style={{ ...styles.button, ...styles.faceBtn, opacity: faceBusy ? 0.8 : 1 }}>
               <ScanFace size={22} style={{ marginInlineEnd: 8, verticalAlign: "-6px" }} />
