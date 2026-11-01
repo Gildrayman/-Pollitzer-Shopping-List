@@ -71,10 +71,17 @@ let activeId = initialFamily();
 export const rememberedFamily = () => (activeId ? FAMILIES[activeId] : null);
 export const currentFamily = () => FAMILIES[activeId || "drayman"];
 
-export function setFamily(id) {
+// remember=false: the manager visits a family without changing which family
+// this phone opens next time (so Face ID and the saved family stay as they were).
+export function setFamily(id, remember = true) {
   if (!FAMILIES[id]) return;
   activeId = id;
-  ls.set(ACTIVE_KEY, id);
+  if (remember) ls.set(ACTIVE_KEY, id);
+}
+
+// Back to the family this phone normally opens (after a manager visit).
+export function restoreFamily() {
+  activeId = initialFamily();
 }
 
 // Which family a typed password opens, or null.
@@ -86,5 +93,32 @@ export function familyForPassword(password) {
 // The name under which a key of the current family is kept on this phone.
 export const localKey = (key) => currentFamily().keyPrefix + key;
 
-// The password asked before an order is sent, per family.
-export const isSendPassword = (value) => sha256(String(value || "").trim()) === currentFamily().sendPasswordHash;
+// The manager's password (Gil). It opens a screen to choose any family.
+// Only its hash is here, never the password itself.
+const ADMIN_HASH = "905c33403195a095fefcbcecea55df203f89c042148afbf4892e0c1a9650f457";
+export const isAdminPassword = (value) => sha256(String(value || "").trim()) === ADMIN_HASH;
+
+// Each family's place on the server, locked with the manager's password, so the
+// manager can open a family without knowing its password. A family missing here
+// is opened with its own password once on each device, then remembered.
+const ADMIN_LOCKED_KEYS = {
+  eshel: "e28c41f5d1b7cb31b9a2898b30479e1430f122e157cb639b811a561f5ca1b7c5",
+};
+const xorHex = (a, b) => [...a].map((c, i) => (parseInt(c, 16) ^ parseInt(b[i], 16)).toString(16)).join("");
+
+// The server key of a family for the manager, or null if this device doesn't know it yet.
+export function adminFamilyKey(id, adminPassword) {
+  const f = FAMILIES[id];
+  if (!f) return null;
+  const known = ls.get(f.keyPrefix + "drayman-sync-key");
+  if (known) return known;
+  const locked = ADMIN_LOCKED_KEYS[id];
+  if (!locked) return null;
+  return xorHex(locked, sha256(`admin-key|${id}|${String(adminPassword || "").trim()}`));
+}
+
+// The password asked before an order is sent, per family. The manager's password works everywhere.
+export const isSendPassword = (value) => {
+  const h = sha256(String(value || "").trim());
+  return h === currentFamily().sendPasswordHash || h === ADMIN_HASH;
+};

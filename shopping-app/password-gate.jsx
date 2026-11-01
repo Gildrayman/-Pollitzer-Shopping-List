@@ -1,8 +1,11 @@
 import React, { useState, useEffect } from "react";
 import { NAME_KEY, greetingForHour } from "./family-shopping-list.jsx";
 import { speakHe } from "./speech.js";
-import { familyForPassword, rememberedFamily, currentFamily, setFamily } from "./families.js";
-import { startSync } from "./sync.js";
+import {
+  FAMILIES, familyForPassword, rememberedFamily, currentFamily, setFamily, restoreFamily,
+  isAdminPassword, adminFamilyKey,
+} from "./families.js";
+import { startSync, startSyncWithKey, flushNow } from "./sync.js";
 import { trace } from "./debug.js";
 import { ScanFace } from "lucide-react";
 import {
@@ -32,6 +35,13 @@ export default function PasswordGate({ children }) {
   const [family, setFamilyState] = useState(rememberedFamily());
   // After a correct password on a phone that has no name for that family yet.
   const [askNameStep, setAskNameStep] = useState(null); // { password }
+  // Manager mode (Gil's own password): kept in memory only, ends when the app locks.
+  const [admin, setAdmin] = useState(null); // { password }
+  const [pickFamily, setPickFamily] = useState(false);
+  // A family this device can't open for the manager yet: its own password, once.
+  const [adminAskFor, setAdminAskFor] = useState(null);
+  const [adminPw, setAdminPw] = useState("");
+  const [adminError, setAdminError] = useState("");
 
   useEffect(() => {
     trace("gate shown, family=" + (rememberedFamily() ? rememberedFamily().id : "none"));
@@ -58,14 +68,49 @@ export default function PasswordGate({ children }) {
       } else if (hiddenAt !== null && Date.now() - hiddenAt > AWAY_LOCK_MS) {
         setUnlocked(false);
         setValue("");
+        if (admin) endAdmin();
       }
     };
     document.addEventListener("visibilitychange", onVisibility);
     return () => document.removeEventListener("visibilitychange", onVisibility);
-  }, [unlocked]);
+  }, [unlocked, admin]);
+
+  // Leaves manager mode: the phone goes back to its own family, untouched.
+  function endAdmin() {
+    trace("admin end");
+    setAdmin(null);
+    setPickFamily(false);
+    setAdminAskFor(null);
+    restoreFamily();
+    setFamilyState(rememberedFamily());
+    setFaceReady(hasFaceLogin());
+    (async () => {
+      try {
+        const res = await window.storage.get(NAME_KEY, false);
+        setSavedName(res && res.value ? res.value : "");
+      } catch { setSavedName(""); }
+    })();
+  }
+
+  const switchFamily = () => {
+    try { flushNow(); } catch {}
+    setUnlocked(false);
+    setPickFamily(true);
+  };
 
   // A new key per family makes the list start fresh from that family's data.
-  if (unlocked) return <React.Fragment key={currentFamily().id}>{children}</React.Fragment>;
+  if (unlocked) {
+    return (
+      <>
+        <React.Fragment key={currentFamily().id}>{children}</React.Fragment>
+        {admin && (
+          <button type="button" onClick={switchFamily} style={styles.adminBar} aria-label="מנהל: החלפת משפחה">
+            מנהל · {currentFamily().name} · החלפה
+          </button>
+        )}
+      </>
+    );
+  }
 
   const welcome = (who) => {
     trace("welcome -> unlock");
@@ -112,6 +157,91 @@ export default function PasswordGate({ children }) {
     setOfferFace(false);
     setUnlocked(true);
   };
+
+  // Manager: open a family by its server key, without changing this phone's own family.
+  const openAsAdmin = async (f, key) => {
+    trace("admin open " + f.id);
+    setFamily(f.id, false);
+    setFamilyState(f);
+    try { startSyncWithKey(key); } catch (e) { trace("startSync error " + e.message); }
+    let who = "";
+    try {
+      const res = await Promise.race([
+        window.storage.get(NAME_KEY, false),
+        new Promise((resolve) => setTimeout(() => resolve(null), 1500)),
+      ]);
+      who = res && res.value ? res.value : "";
+    } catch {}
+    if (!who) {
+      who = "גיל (מנהל)";
+      window.storage.set(NAME_KEY, who, false).catch(() => {});
+    }
+    setSavedName(who);
+    setPickFamily(false);
+    setAdminAskFor(null);
+    setAdminPw("");
+    welcome(who);
+  };
+
+  const chooseFamily = (f) => {
+    setAdminError("");
+    setFamily(f.id, false);
+    const key = adminFamilyKey(f.id, admin && admin.password);
+    if (key) { openAsAdmin(f, key); return; }
+    setAdminPw("");
+    setAdminAskFor(f);
+  };
+
+  const confirmFamilyPassword = () => {
+    const f = adminAskFor;
+    const found = familyForPassword(adminPw);
+    if (!found || found.id !== f.id) {
+      setAdminError(`זו לא הסיסמה של ${f.name}. נסו שוב.`);
+      setAdminPw("");
+      return;
+    }
+    setFamily(f.id, false);
+    try { startSync(adminPw); } catch (e) { trace("startSync error " + e.message); }
+    openAsAdmin(f, null);
+  };
+
+  if (pickFamily && admin) {
+    return (
+      <div dir="rtl" style={styles.page}>
+        <div style={styles.card}>
+          <h1 style={styles.title}>כניסת מנהל</h1>
+          {adminAskFor ? (
+            <>
+              <p style={styles.sub}>כדי לפתוח את {adminAskFor.name} בטלפון הזה, הקלידו פעם אחת את הסיסמה של המשפחה. מהפעם הבאה היא תיפתח מיד.</p>
+              <input
+                type="password"
+                aria-label="סיסמת המשפחה"
+                value={adminPw}
+                onChange={(e) => { setAdminPw(e.target.value); setAdminError(""); }}
+                onKeyDown={(e) => { if (e.key === "Enter") confirmFamilyPassword(); }}
+                style={styles.input}
+              />
+              {adminError && <p role="alert" style={styles.error}>{adminError}</p>}
+              <button type="button" onClick={confirmFamilyPassword} disabled={!adminPw.trim()} style={{ ...styles.button, opacity: adminPw.trim() ? 1 : 0.5 }}>
+                פתיחה
+              </button>
+              <button type="button" onClick={() => { setAdminAskFor(null); setAdminError(""); }} style={styles.linkBtn}>חזרה לבחירת משפחה</button>
+            </>
+          ) : (
+            <>
+              <p style={styles.sub}>לאיזו משפחה להיכנס?</p>
+              {Object.values(FAMILIES).map((f) => (
+                <button key={f.id} type="button" onClick={() => chooseFamily(f)} style={styles.button}>
+                  {f.name}
+                </button>
+              ))}
+              <button type="button" onClick={() => { endAdmin(); setValue(""); }} style={styles.linkBtn}>יציאה ממצב מנהל</button>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   if (offerFace) {
     return (
@@ -162,6 +292,15 @@ export default function PasswordGate({ children }) {
     if (e && e.preventDefault) e.preventDefault();
     trace(`submit len=${value.trim().length}`);
     if (!canSubmit) return;
+    if (isAdminPassword(value)) {
+      trace("admin login");
+      setAdmin({ password: value.trim() });
+      setValue("");
+      setError("");
+      setAdminAskFor(null);
+      setPickFamily(true);
+      return;
+    }
     let f = null;
     try { f = familyForPassword(value); } catch (err) { trace("check error " + err.message); }
     trace("family=" + (f ? f.id : "none"));
@@ -286,6 +425,7 @@ const styles = {
   or: { margin: "2px 0", color: "#7C8574", fontSize: "0.85rem", textAlign: "center" },
   chips: { display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "center", margin: "4px 0 6px" },
   chip: { padding: "10px 18px", borderRadius: 999, border: "1px solid #3E7C5966", background: "#EEF5EF", color: "#243026", fontSize: "1.05rem", fontWeight: 600, fontFamily: "'Heebo', sans-serif", cursor: "pointer" },
+  adminBar: { position: "fixed", top: 8, left: 8, zIndex: 9999, padding: "6px 12px", borderRadius: 999, border: "none", background: "#243026", color: "#FFFFFF", fontSize: "0.8rem", fontWeight: 700, fontFamily: "'Heebo', sans-serif", boxShadow: "0 4px 14px #24302640", cursor: "pointer" },
   linkBtn: { marginTop: 4, padding: "8px", border: "none", background: "transparent", color: "#3E7C59", fontSize: "0.9rem", fontWeight: 600, fontFamily: "'Heebo', sans-serif", cursor: "pointer", textDecoration: "underline" },
   error: { margin: 0, color: "#A33A31", fontSize: "0.9rem" },
   button: { marginTop: 6, padding: "12px 14px", borderRadius: 10, border: "none", background: "#3E7C59", color: "#FFFFFF", fontSize: "1rem", fontWeight: 700, fontFamily: "'Heebo', sans-serif", cursor: "pointer" },

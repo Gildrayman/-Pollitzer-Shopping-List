@@ -37,10 +37,15 @@ const deviceId = (() => {
   return id;
 })();
 
-const readPending = () => { try { return JSON.parse(ls.get(PENDING_KEY()) || "{}"); } catch { return {}; } };
-const writePending = (p) => (Object.keys(p).length ? ls.set(PENDING_KEY(), JSON.stringify(p)) : ls.del(PENDING_KEY()));
+const readPending = (pk = PENDING_KEY()) => { try { return JSON.parse(ls.get(pk) || "{}"); } catch { return {}; } };
+const writePending = (p, pk = PENDING_KEY()) => (Object.keys(p).length ? ls.set(pk, JSON.stringify(p)) : ls.del(pk));
 
 let familyPath = null; // families/<secret> once signed in
+// The family the connection belongs to (its key prefix on the phone). When the phone
+// switches to another family, nothing from the old connection is written or sent,
+// so one family's list can never land in another's.
+let connPrefix = null;
+const sameFamily = () => connPrefix === localKey("");
 let source = null;
 let status = FIREBASE_DB_URL ? "connecting" : "local";
 let flushing = false;
@@ -64,14 +69,17 @@ const baseUrl = () => `${FIREBASE_DB_URL.replace(/\/+$/, "")}/${familyPath}`;
 // leaving: the app is being closed or hidden; the request is sent even if
 // another one is on its way, and the browser finishes it after the page is gone.
 async function flush(leaving = false) {
-  if (!familyPath || (flushing && !leaving)) return;
-  const pending = readPending();
+  if (!familyPath || !sameFamily() || (flushing && !leaving)) return;
+  // Kept for this send, in case the manager switches family while it is on its way.
+  const pk = PENDING_KEY();
+  const url = `${baseUrl()}.json`;
+  const pending = readPending(pk);
   const keys = Object.keys(pending);
   if (!keys.length) return;
   flushing = true;
   const name = fs.get(MEMBER_NAME_KEY) || "";
   try {
-    const res = await fetch(`${baseUrl()}.json`, {
+    const res = await fetch(url, {
       method: "PATCH",
       keepalive: leaving,
       headers: { "Content-Type": "application/json" },
@@ -79,9 +87,9 @@ async function flush(leaving = false) {
     });
     if (!res.ok) throw new Error("HTTP " + res.status);
     // Drop only what was sent; anything changed meanwhile stays queued.
-    const now = readPending();
+    const now = readPending(pk);
     for (const k of keys) if (now[k] === pending[k]) delete now[k];
-    writePending(now);
+    writePending(now, pk);
   } catch (e) {
     clearTimeout(retryTimer);
     retryTimer = setTimeout(flush, 5000);
@@ -154,7 +162,9 @@ function connect() {
   setStatus("connecting");
   // Firebase streams the data first in full, then every change (Server-Sent Events).
   source = new EventSource(`${baseUrl()}.json`);
+  const es = source;
   const onData = (kind) => (e) => {
+    if (!sameFamily()) { es.close(); return; }
     let msg;
     try { msg = JSON.parse(e.data); } catch { return; }
     if (!msg) return;
@@ -220,7 +230,14 @@ export function startSync(password) {
   const path = `families/${key}`;
   if (path === familyPath && source && source.readyState !== 2) return;
   familyPath = path;
+  connPrefix = localKey("");
   connect();
+}
+
+// The manager opens a family by its server key (see adminFamilyKey).
+export function startSyncWithKey(key) {
+  if (key) ls.set(SYNC_KEY(), key);
+  startSync();
 }
 
 export const hasSyncKey = () => !!ls.get(SYNC_KEY());
@@ -229,7 +246,7 @@ export const hasSyncKey = () => !!ls.get(SYNC_KEY());
 export const flushNow = () => flush(true);
 
 if (typeof window !== "undefined") {
-  window.addEventListener("online", () => { if (familyPath) { connect(); flush(); } });
+  window.addEventListener("online", () => { if (familyPath && sameFamily()) { connect(); flush(); } });
   window.addEventListener("offline", () => { if (familyPath) setStatus("offline"); });
   // Another tab on the same phone changed something.
   window.addEventListener("storage", (e) => { const k = familyKeyOf(e.key); if (k) notify([k], null); });
