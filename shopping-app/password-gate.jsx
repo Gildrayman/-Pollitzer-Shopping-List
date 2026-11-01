@@ -10,7 +10,7 @@ import { trace } from "./debug.js";
 import { ScanFace } from "lucide-react";
 import {
   faceLoginSupported, hasFaceLogin, hasAdminFace, registerAdminFace, adminFaceLogin, hasAnyFace, anyFaceLogin,
-  registerFaceLogin, faceLogin,
+  registerFaceLogin, faceLogin, markFaceStale, isFaceStale, clearFaceStale,
 } from "./passkey.js";
 
 // Leaving the app for longer than this locks it again. A short grace period
@@ -163,9 +163,11 @@ export default function PasswordGate({ children }) {
         welcome(who);
         return;
       }
+      markFaceStale();
       if (!auto) setError("זיהוי הפנים לא הצליח. נסו שוב או הקלידו סיסמה.");
     } catch (e) {
       if (e && e.name === "AbortError") return; // replaced by a newer tap
+      markFaceStale();
       if (!auto) setError("זיהוי הפנים בוטל או לא הצליח. נסו שוב או הקלידו סיסמה.");
     } finally {
       setFaceBusy(false);
@@ -370,7 +372,7 @@ export default function PasswordGate({ children }) {
       try { supported = await Promise.race([faceLoginSupported(), new Promise((r) => setTimeout(() => r(false), 1500))]); } catch { supported = false; }
       if (supported) setFaceSupported(true);
     }
-    if (supported && !hasFaceLogin()) {
+    if (supported && (!hasFaceLogin() || isFaceStale())) {
       speakHe(`${greetingForHour(new Date().getHours())}${who ? `, ${who}` : ""}.`);
       setOfferFace(true);
     } else {

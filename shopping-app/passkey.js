@@ -45,6 +45,13 @@ export const declineFaceLogin = () => ls.set(DECLINED_KEY(), "1");
 export const undeclineFaceLogin = () => ls.del(DECLINED_KEY());
 export const removeFaceLogin = () => ls.del(CRED_KEY());
 
+// A Face ID attempt that failed while the app still had a note of a saved Face ID: the phone no
+// longer has it (or it was never kept). After the next correct password the app offers to set it up again.
+const STALE_KEY = "face-stale";
+export const markFaceStale = () => { if (allSavedFaces().length) ls.set(STALE_KEY, "1"); };
+export const isFaceStale = () => !!ls.get(STALE_KEY);
+export const clearFaceStale = () => ls.del(STALE_KEY);
+
 // The manager's own Face ID on this phone, separate from the family's.
 const ADMIN_CRED_KEY = "admin/passkey-id";
 export const hasAdminFace = () => !!ls.get(ADMIN_CRED_KEY);
@@ -66,6 +73,7 @@ export async function registerFaceLogin(name, credKey = CRED_KEY()) {
   });
   if (!cred) throw new Error("no credential");
   ls.set(credKey, toB64(cred.rawId));
+  ls.del(STALE_KEY);
   if (credKey !== ADMIN_CRED_KEY) ls.del(DECLINED_KEY());
 }
 export const registerAdminFace = () => registerFaceLogin("מנהל", ADMIN_CRED_KEY);
