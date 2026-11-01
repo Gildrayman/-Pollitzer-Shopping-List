@@ -47,6 +47,27 @@ export const FAMILIES = {
       askCopyEmail: true,
     },
   },
+  // Third family, set up exactly like the Eshel family: its own place on the
+  // server, its own keys on the phone, its own Face ID, and orders by email
+  // with the family's own email (typed once on the first send).
+  tzafi: {
+    id: "tzafi",
+    passwordHash: "0d46ebf59e025c235530010e020e27215938fc186b51126f2ba2aa6ff99be7db",
+    sendPasswordHash: "0d46ebf59e025c235530010e020e27215938fc186b51126f2ba2aa6ff99be7db",
+    name: "צפי ודפנה",
+    members: ["צפי", "דפנה"],
+    namePlaceholder: "למשל: צפי",
+    keyPrefix: "tzafi/",
+    passkeyKey: "tzafi/passkey-id",
+    passkeyDeclinedKey: "tzafi/passkey-declined",
+    mailEnabled: true,
+    order: {
+      email: "karkur@politzer.co.il",
+      header: ["צפי ודפנה"],
+      subject: "צפי ודפנה",
+      askCopyEmail: true,
+    },
+  },
 };
 
 const ACTIVE_KEY = "shopping-active-family";
