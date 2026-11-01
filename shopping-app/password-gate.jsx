@@ -184,7 +184,7 @@ export default function PasswordGate({ children }) {
       setOfferFace(false);
       setUnlocked(true);
     } catch (e) {
-      setFaceNote("לא הצלחנו להפעיל זיהוי פנים בטלפון הזה. אפשר להמשיך עם סיסמה.");
+      setFaceNote("לא הצלחנו להפעיל זיהוי פנים בטלפון הזה. אפשר להמשיך עם סיסמה." + " [" + ((e && e.name) || "?") + (e && e.message ? ": " + String(e.message).slice(0, 90) : "") + "]");
     } finally {
       setFaceBusy(false);
     }
