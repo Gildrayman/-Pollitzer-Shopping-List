@@ -501,6 +501,10 @@ export default function PasswordGate({ children }) {
           <p style={styles.hint}>אחרי הסיסמה אפשר להפעיל כניסה עם זיהוי פנים, ואז לא צריך להקליד אותה שוב.</p>
         )}
         {faceNote && <p style={styles.hint}>{faceNote}</p>}
+        <p style={styles.version}>
+          גרסה {typeof __BUILD__ !== "undefined" ? __BUILD__ : "dev"}
+          {!faceSupported ? ` · זיהוי פנים: ${typeof window !== "undefined" && window.PublicKeyCredential ? (window.isSecureContext ? "לא זמין במכשיר" : "לא מאובטח") : "הדפדפן הזה לא תומך"}` : ""}
+        </p>
         {faceSupported && adminFaceReady && (
           <button type="button" onClick={loginAdminWithFace} disabled={faceBusy} style={styles.linkBtn}>
             <ScanFace size={16} style={{ marginInlineEnd: 6, verticalAlign: "-3px" }} />
@@ -513,6 +517,7 @@ export default function PasswordGate({ children }) {
 }
 
 const styles = {
+  version: { margin: "10px 0 0", textAlign: "center", color: "#8A9384", fontSize: "0.72rem" },
   page: { minHeight: "100vh", background: "radial-gradient(ellipse at top, #F7F8EF 0%, #EFF1E3 55%, #E6E9D7 100%)", display: "flex", alignItems: "center", justifyContent: "center", padding: "24px 16px", boxSizing: "border-box", fontFamily: "'Heebo', sans-serif" },
   card: { width: "100%", maxWidth: 360, background: "#FFFFFF", border: "1px solid #24302618", borderRadius: 18, padding: "32px 24px", boxShadow: "0 10px 40px #24302612", display: "flex", flexDirection: "column", gap: 10, boxSizing: "border-box" },
   title: { fontFamily: "'Suez One', serif", fontWeight: 400, fontSize: "1.5rem", color: "#243026", margin: 0, textAlign: "center" },
