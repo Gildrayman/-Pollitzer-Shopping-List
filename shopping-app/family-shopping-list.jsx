@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { Plus, Check, ShoppingBasket, X, Users, Upload, FileText, Eye, ArrowRight, Send, MessageCircle, Save, History, Trash2, Mic, ScanFace, RotateCcw } from "lucide-react";
+import { Plus, Check, ShoppingBasket, X, Users, Upload, FileText, Eye, ArrowRight, Send, MessageCircle, Save, History, Trash2, Mic, ScanFace, RotateCcw, LogOut } from "lucide-react";
 import { isSendPassword, currentFamily } from "./families.js";
 import { trace } from "./debug.js";
-import { faceLoginSupported, hasFaceLogin, faceLogin } from "./passkey.js";
-import { getSyncStatus } from "./sync.js";
+import { faceLoginSupported, hasSendFace, sendFaceLogin } from "./passkey.js";
+import { getSyncStatus, flushNow } from "./sync.js";
 import { readHistory, recordHistory } from "./history.js";
 import { isInstalled, isIOS, notifyPermission, badgePromptDone, markBadgePromptDone, enableBadge } from "./badge.js";
 import { speakHe, stopSpeaking, primeSpeech, onSpeechStatus, micTone, MIC_HELP } from "./speech.js";
@@ -437,8 +437,8 @@ export default function ShoppingList() {
   const [faceSend, setFaceSend] = useState(false);
   const [faceSendBusy, setFaceSendBusy] = useState(false);
   useEffect(() => {
-    if (!hasFaceLogin()) return;
-    faceLoginSupported().then((ok) => setFaceSend(ok && hasFaceLogin()));
+    if (!hasSendFace()) return;
+    faceLoginSupported().then((ok) => setFaceSend(ok && hasSendFace()));
   }, []);
   const [mailPw, setMailPw] = useState("");
   const [mailPwError, setMailPwError] = useState("");
@@ -688,6 +688,18 @@ export default function ShoppingList() {
     const by = r.name && Date.now() - r.at < 6000 ? r.name : userName;
     try { recordHistory(items, by); } catch {}
   }, [items, loaded]);
+
+  // Saves everything (to the phone and to the family's server) and closes the app back to the
+  // login screen, so the next person needs Face ID or the password.
+  const exitAndSave = async () => {
+    // A product amount still being typed is saved when its box loses focus.
+    try { document.activeElement && document.activeElement.blur && document.activeElement.blur(); } catch {}
+    await new Promise((r) => setTimeout(r, 250));
+    try { flushNow(); } catch {}
+    stopSpeaking();
+    speakHe("הרשימה נשמרה. להתראות.");
+    window.dispatchEvent(new CustomEvent("app-lock"));
+  };
 
   const openHistory = () => {
     setHistoryList(readHistory().slice().reverse());
@@ -1198,7 +1210,7 @@ export default function ShoppingList() {
     setMailPwError("");
     setFaceSendBusy(true);
     try {
-      if (await faceLogin()) {
+      if (await sendFaceLogin()) {
         setMailPw("");
         setMailStep("ready");
       } else {
@@ -2171,6 +2183,10 @@ export default function ShoppingList() {
               <Upload size={12} style={{ marginInlineEnd: 3, verticalAlign: "-2px" }} />
               ייבוא
             </button>
+            <button onClick={exitAndSave} className="chalk-btn" style={styles.listActionBtn}>
+              <LogOut size={12} style={{ marginInlineEnd: 3, verticalAlign: "-2px" }} />
+              יציאה ושמירה
+            </button>
           </div>
 
           {activeTab === "new" ? (
@@ -2748,7 +2764,7 @@ const styles = {
   deleteBtn: { flex: "0 0 auto", background: "transparent", border: "none", color: "#7C8574", cursor: "pointer", padding: 4, display: "flex" },
   clearBtn: { display: "block", margin: "30px auto 0", padding: "10px 20px", borderRadius: 10, border: "1px dashed #24302644", background: "transparent", color: "#4B5347", fontFamily: "'Heebo', sans-serif", fontSize: "0.82rem", cursor: "pointer" },
   footer: { textAlign: "center", color: "#7C8574", fontSize: "0.75rem", marginTop: 24 },
-  listActionsRow: { display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 5, marginBottom: 8 },
+  listActionsRow: { display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 5, marginBottom: 8 },
   listActionBtn: { minWidth: 0, padding: "6px 2px", borderRadius: 8, border: "1px solid #24302633", background: "#FFFFFFAA", color: "#243026", fontFamily: "'Heebo', sans-serif", fontSize: "0.66rem", fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", textAlign: "center" },
   importBottomBtn: { display: "block", width: "100%", marginTop: 18, padding: "12px 8px", borderRadius: 10, border: "1px dashed #24302644", background: "transparent", color: "#4B5347", fontFamily: "'Heebo', sans-serif", fontSize: "0.83rem", cursor: "pointer" },
   newProdCard: { display: "flex", flexDirection: "column", gap: 6, padding: "14px 14px 16px", background: "#FFFFFF", border: "1px solid #24302622", borderRadius: 12 },

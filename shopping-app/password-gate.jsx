@@ -9,7 +9,7 @@ import { startSync, startSyncWithKey, flushNow } from "./sync.js";
 import { trace } from "./debug.js";
 import { ScanFace } from "lucide-react";
 import {
-  faceLoginSupported, hasFaceLogin,
+  faceLoginSupported, hasFaceLogin, hasAdminFace, registerAdminFace, adminFaceLogin,
   registerFaceLogin, faceLogin,
 } from "./passkey.js";
 
@@ -31,6 +31,9 @@ export default function PasswordGate({ children }) {
   const [offerFace, setOfferFace] = useState(false);
   const [faceBusy, setFaceBusy] = useState(false);
   const [faceNote, setFaceNote] = useState("");
+  // The manager's Face ID: offered after the manager password, then a button on the login screen.
+  const [offerAdminFace, setOfferAdminFace] = useState(false);
+  const [adminFaceReady, setAdminFaceReady] = useState(hasAdminFace());
   // The family this phone signs in to; the password decides it.
   const [family, setFamilyState] = useState(rememberedFamily());
   // After a correct password on a phone that has no name for that family yet.
@@ -74,6 +77,17 @@ export default function PasswordGate({ children }) {
     document.addEventListener("visibilitychange", onVisibility);
     return () => document.removeEventListener("visibilitychange", onVisibility);
   }, [unlocked, admin]);
+
+  // "יציאה ושמירה" in the app: back to the login screen (the list was already saved).
+  useEffect(() => {
+    const onLock = () => {
+      setUnlocked(false);
+      setValue("");
+      if (admin) endAdmin();
+    };
+    window.addEventListener("app-lock", onLock);
+    return () => window.removeEventListener("app-lock", onLock);
+  }, [admin]);
 
   // Each time the password screen opens on a phone with Face ID turned on, Face ID starts by itself.
   const autoFaceRef = useRef(false);
@@ -217,6 +231,57 @@ export default function PasswordGate({ children }) {
     openAsAdmin(f, null);
   };
 
+  const loginAdminWithFace = async () => {
+    setError("");
+    setFaceBusy(true);
+    try {
+      if (await adminFaceLogin()) {
+        trace("admin login (face)");
+        setAdmin({ password: "" });
+        setAdminAskFor(null);
+        setPickFamily(true);
+        return;
+      }
+      setError("זיהוי הפנים לא הצליח. נסו שוב או הקלידו את סיסמת המנהל.");
+    } catch (e) {
+      setError("זיהוי הפנים בוטל או לא הצליח. נסו שוב או הקלידו את סיסמת המנהל.");
+    } finally {
+      setFaceBusy(false);
+    }
+  };
+
+  const enableAdminFace = async () => {
+    setFaceBusy(true);
+    setFaceNote("");
+    try {
+      await registerAdminFace();
+      setAdminFaceReady(true);
+      setOfferAdminFace(false);
+      speakHe("זיהוי הפנים למנהל הופעל.");
+    } catch (e) {
+      setFaceNote("לא הצלחנו להפעיל זיהוי פנים בטלפון הזה. אפשר להמשיך עם הסיסמה.");
+    } finally {
+      setFaceBusy(false);
+    }
+  };
+
+  if (offerAdminFace && admin) {
+    return (
+      <div dir="rtl" style={styles.page}>
+        <div style={styles.card}>
+          <ScanFace size={44} color="#3E7C59" style={{ alignSelf: "center" }} />
+          <h1 style={styles.title}>כניסת מנהל מהירה</h1>
+          <p style={styles.sub}>להיכנס כמנהל בפעם הבאה עם זיהוי פנים, במקום להקליד את סיסמת המנהל?</p>
+          {faceNote && <p role="alert" style={styles.error}>{faceNote}</p>}
+          <button type="button" onClick={enableAdminFace} disabled={faceBusy} style={{ ...styles.button, opacity: faceBusy ? 0.6 : 1 }}>
+            כן, להפעיל זיהוי פנים
+          </button>
+          <button type="button" onClick={() => { setOfferAdminFace(false); setFaceNote(""); }} style={styles.linkBtn}>לא עכשיו</button>
+        </div>
+      </div>
+    );
+  }
+
   if (pickFamily && admin) {
     return (
       <div dir="rtl" style={styles.page}>
@@ -316,6 +381,9 @@ export default function PasswordGate({ children }) {
       setValue("");
       setError("");
       setAdminAskFor(null);
+      let supported = faceSupported;
+      if (!supported) { try { supported = await faceLoginSupported(); } catch { supported = false; } }
+      if (supported && !hasAdminFace()) setOfferAdminFace(true);
       setPickFamily(true);
       return;
     }
@@ -423,6 +491,12 @@ export default function PasswordGate({ children }) {
           <p style={styles.hint}>אחרי הסיסמה אפשר להפעיל כניסה עם זיהוי פנים, ואז לא צריך להקליד אותה שוב.</p>
         )}
         {faceNote && <p style={styles.hint}>{faceNote}</p>}
+        {faceSupported && adminFaceReady && (
+          <button type="button" onClick={loginAdminWithFace} disabled={faceBusy} style={styles.linkBtn}>
+            <ScanFace size={16} style={{ marginInlineEnd: 6, verticalAlign: "-3px" }} />
+            כניסת מנהל עם זיהוי פנים
+          </button>
+        )}
       </div>
     </div>
   );

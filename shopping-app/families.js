@@ -136,7 +136,8 @@ export function adminFamilyKey(id, adminPassword) {
   const known = ls.get(f.keyPrefix + "drayman-sync-key");
   if (known) return known;
   const locked = ADMIN_LOCKED_KEYS[id];
-  if (!locked) return null;
+  // Without the typed manager password (manager Face ID) only keys this phone already knows are used.
+  if (!locked || !String(adminPassword || "").trim()) return null;
   return xorHex(locked, sha256(`admin-key|${id}|${String(adminPassword || "").trim()}`));
 }
 

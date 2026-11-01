@@ -34,12 +34,16 @@ export const declineFaceLogin = () => ls.set(DECLINED_KEY(), "1");
 export const undeclineFaceLogin = () => ls.del(DECLINED_KEY());
 export const removeFaceLogin = () => ls.del(CRED_KEY());
 
+// The manager's own Face ID on this phone, separate from the family's.
+const ADMIN_CRED_KEY = "admin/passkey-id";
+export const hasAdminFace = () => !!ls.get(ADMIN_CRED_KEY);
+
 // Must run from a tap. Asks the phone for Face ID / fingerprint once and remembers it.
-export async function registerFaceLogin(name) {
+export async function registerFaceLogin(name, credKey = CRED_KEY()) {
   const cred = await navigator.credentials.create({
     publicKey: {
       challenge: randomBytes(32),
-      rp: { name: `קניות ${currentFamily().name}` },
+      rp: { name: credKey === ADMIN_CRED_KEY ? "קניות: מנהל" : `קניות ${currentFamily().name}` },
       user: { id: randomBytes(16), name: name || "family", displayName: name || currentFamily().name },
       pubKeyCredParams: [{ type: "public-key", alg: -7 }, { type: "public-key", alg: -257 }],
       authenticatorSelection: { authenticatorAttachment: "platform", userVerification: "required", residentKey: "preferred" },
@@ -48,18 +52,20 @@ export async function registerFaceLogin(name) {
     },
   });
   if (!cred) throw new Error("no credential");
-  ls.set(CRED_KEY(), toB64(cred.rawId));
-  ls.del(DECLINED_KEY());
+  ls.set(credKey, toB64(cred.rawId));
+  if (credKey !== ADMIN_CRED_KEY) ls.del(DECLINED_KEY());
 }
+export const registerAdminFace = () => registerFaceLogin("מנהל", ADMIN_CRED_KEY);
 
 // Must run from a tap. Resolves true only when the phone confirmed the face or finger.
-export async function faceLogin() {
-  const id = ls.get(CRED_KEY());
-  if (!id) return false;
+// keys: which saved Face IDs may answer (the family's by default).
+export async function faceLogin(keys = [CRED_KEY()]) {
+  const ids = keys.map((k) => ls.get(k)).filter(Boolean);
+  if (!ids.length) return false;
   const assertion = await navigator.credentials.get({
     publicKey: {
       challenge: randomBytes(32),
-      allowCredentials: [{ type: "public-key", id: fromB64(id), transports: ["internal", "hybrid"] }],
+      allowCredentials: ids.map((id) => ({ type: "public-key", id: fromB64(id), transports: ["internal", "hybrid"] })),
       userVerification: "required",
       timeout: 60000,
     },
@@ -69,3 +75,8 @@ export async function faceLogin() {
   const flags = new Uint8Array(assertion.response.authenticatorData)[32];
   return (flags & 0x04) !== 0;
 }
+
+export const adminFaceLogin = () => faceLogin([ADMIN_CRED_KEY]);
+// Sending an order: the family's Face ID, or the manager's on the manager's phone.
+export const hasSendFace = () => hasFaceLogin() || hasAdminFace();
+export const sendFaceLogin = () => faceLogin([CRED_KEY(), ADMIN_CRED_KEY]);
