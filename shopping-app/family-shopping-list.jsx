@@ -1217,6 +1217,7 @@ export default function ShoppingList() {
         setMailPwError("זיהוי הפנים לא הצליח. נסו שוב או הקלידו סיסמה.");
       }
     } catch (e) {
+      if (e && e.name === "AbortError") return; // replaced by a newer tap
       setMailPwError("זיהוי הפנים בוטל או לא הצליח. נסו שוב או הקלידו סיסמה.");
     } finally {
       setFaceSendBusy(false);
@@ -2614,7 +2615,7 @@ export default function ShoppingList() {
               <div>
                 {faceSend && (
                   <>
-                    <button type="button" onClick={sendWithFace} disabled={faceSendBusy} className="chalk-btn" style={{ ...styles.confirmBtn, width: "100%", marginBottom: 10, opacity: faceSendBusy ? 0.6 : 1 }}>
+                    <button type="button" onClick={sendWithFace} className="chalk-btn" style={{ ...styles.confirmBtn, width: "100%", marginBottom: 10, opacity: faceSendBusy ? 0.6 : 1 }}>
                       <ScanFace size={18} style={{ marginInlineEnd: 6, verticalAlign: "-4px" }} />
                       שליחה עם זיהוי פנים
                     </button>

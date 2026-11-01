@@ -14,6 +14,14 @@ const ls = {
   del(k) { try { window.localStorage.removeItem(k); } catch {} },
 };
 
+// Only one Face ID request at a time: a new tap cancels one the phone left hanging.
+let pending = null;
+function freshSignal() {
+  try { if (pending) pending.abort(); } catch {}
+  pending = typeof AbortController !== "undefined" ? new AbortController() : null;
+  return pending ? pending.signal : undefined;
+}
+
 const randomBytes = (n) => crypto.getRandomValues(new Uint8Array(n));
 const toB64 = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf)));
 const fromB64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
@@ -63,6 +71,7 @@ export async function faceLogin(keys = [CRED_KEY()]) {
   const ids = keys.map((k) => ls.get(k)).filter(Boolean);
   if (!ids.length) return false;
   const assertion = await navigator.credentials.get({
+    signal: freshSignal(),
     publicKey: {
       challenge: randomBytes(32),
       allowCredentials: ids.map((id) => ({ type: "public-key", id: fromB64(id), transports: ["internal", "hybrid"] })),
@@ -98,6 +107,7 @@ export async function anyFaceLogin() {
   const saved = allSavedFaces();
   if (!saved.length) return null;
   const assertion = await navigator.credentials.get({
+    signal: freshSignal(),
     publicKey: {
       challenge: randomBytes(32),
       allowCredentials: saved.map((x) => ({ type: "public-key", id: fromB64(x.id), transports: ["internal", "hybrid"] })),

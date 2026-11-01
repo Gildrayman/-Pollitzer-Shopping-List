@@ -90,17 +90,9 @@ export default function PasswordGate({ children }) {
     return () => window.removeEventListener("app-lock", onLock);
   }, [admin]);
 
-  // Each time the password screen opens on a phone with Face ID turned on, Face ID starts by itself.
-  const autoFaceRef = useRef(false);
+  // Face ID starts only from a tap on its button. (Starting it by itself left the iPhone with a
+  // Face ID request it never answered, so the button stopped working.)
   const skipAutoFaceRef = useRef(false);
-  useEffect(() => {
-    if (unlocked) { autoFaceRef.current = false; return; }
-    if (!unlocked && skipAutoFaceRef.current) { skipAutoFaceRef.current = false; autoFaceRef.current = true; return; }
-    if (autoFaceRef.current || admin || pickFamily || savedName === null || !faceSupported || !hasAnyFace()) return;
-    autoFaceRef.current = true;
-    const t = setTimeout(() => { if (document.visibilityState === "visible") loginWithFace(true); }, 400);
-    return () => clearTimeout(t);
-  }, [unlocked, faceSupported, family, admin, pickFamily, savedName]);
 
   // Leaves manager mode: the phone goes back to its own family, untouched.
   function endAdmin() {
@@ -173,6 +165,7 @@ export default function PasswordGate({ children }) {
       }
       if (!auto) setError("זיהוי הפנים לא הצליח. נסו שוב או הקלידו סיסמה.");
     } catch (e) {
+      if (e && e.name === "AbortError") return; // replaced by a newer tap
       if (!auto) setError("זיהוי הפנים בוטל או לא הצליח. נסו שוב או הקלידו סיסמה.");
     } finally {
       setFaceBusy(false);
@@ -483,7 +476,7 @@ export default function PasswordGate({ children }) {
         <p style={styles.sub}>הכניסה למשפחה בלבד. {faceReady && faceSupported ? "היכנסו עם זיהוי פנים או הקלידו סיסמה." : "הקלידו את הסיסמה כדי להמשיך."}</p>
         {faceReady && faceSupported && (
           <>
-            <button type="button" onClick={() => loginWithFace(false)} disabled={faceBusy} style={{ ...styles.button, ...styles.faceBtn, opacity: faceBusy ? 0.6 : 1 }}>
+            <button type="button" onClick={() => loginWithFace(false)} style={{ ...styles.button, ...styles.faceBtn, opacity: faceBusy ? 0.8 : 1 }}>
               <ScanFace size={22} style={{ marginInlineEnd: 8, verticalAlign: "-6px" }} />
               כניסה עם זיהוי פנים
             </button>
