@@ -64,6 +64,54 @@ const TTS_URLS = [
   (q) => `https://translate.googleapis.com/translate_tts?ie=UTF-8&tl=iw&client=gtx&q=${encodeURIComponent(q)}`,
   (q) => `https://translate.google.com/translate_tts?ie=UTF-8&tl=iw&client=tw-ob&q=${encodeURIComponent(q)}`,
 ];
+// A natural, human Hebrew voice from Google Cloud Text-to-Speech. Used when a key is set here
+// (a browser key limited to this site and to the Text-to-Speech API); otherwise the free voice below.
+const CLOUD_TTS_KEY = "";
+const CLOUD_VOICE = { languageCode: "he-IL", name: "he-IL-Wavenet-A" };
+let cloudBrokenUntil = 0; // after a failure, the free voice is used for a minute
+const cloudCache = new Map();
+async function cloudAudio(text) {
+  if (cloudCache.has(text)) return cloudCache.get(text);
+  const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
+  const timer = setTimeout(() => ctrl && ctrl.abort(), 6000);
+  try {
+    const res = await fetch(`https://texttospeech.googleapis.com/v1/text:synthesize?key=${CLOUD_TTS_KEY}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ input: { text }, voice: CLOUD_VOICE, audioConfig: { audioEncoding: "MP3", speakingRate: 1.0 } }),
+      signal: ctrl ? ctrl.signal : undefined,
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const j = await res.json();
+    if (!j.audioContent) throw new Error("no audio");
+    const url = `data:audio/mpeg;base64,${j.audioContent}`;
+    if (cloudCache.size > 60) cloudCache.delete(cloudCache.keys().next().value);
+    cloudCache.set(text, url);
+    return url;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Plays one whole message in the cloud voice. Calls onEnd when done, onFail if it can't.
+function speakCloud(text, onEnd, onFail, mine) {
+  cloudAudio(text).then((url) => {
+    if (mine !== token) return;
+    const a = getPlayer(0);
+    if (!a) { onFail("אין נגן"); return; }
+    player = a;
+    let settled = false;
+    const finish = (fn) => { if (settled) return; settled = true; clearTimeout(guard); a.onended = null; a.onerror = null; fn(); };
+    const guard = setTimeout(() => finish(onEnd), 8000 + text.length * 150);
+    a.onended = () => finish(onEnd);
+    a.onerror = () => finish(() => onFail("לא התנגן"));
+    a.__url = url;
+    a.src = url;
+    const pr = a.play();
+    if (pr && pr.catch) pr.catch((e) => finish(() => onFail(e && e.name === "NotAllowedError" ? "הדפדפן חסם השמעה" : "לא התנגן")));
+  }).catch((e) => { if (mine === token) onFail(e && e.message ? e.message : "שגיאה"); });
+}
+
 // Two players take turns: while one speaks a sentence, the other already loads the next one,
 // so sentences follow each other without a gap, the way a person speaks.
 const players = [];
@@ -162,7 +210,8 @@ export function speakHe(text, onDone) {
     setStatus({ state: "שקט" });
     if (onDone) onDone();
   };
-  const parts = text ? splitParts(prepareHe(text)) : [];
+  const spoken = text ? prepareHe(text) : "";
+  const parts = spoken ? splitParts(spoken) : [];
   if (!parts.length) { done(); return; }
   pauseAll();
   const s = synth();
@@ -187,6 +236,16 @@ export function speakHe(text, onDone) {
       speakPartSynth(part, next, mine);
     }
   };
+  // The human voice speaks the whole message at once, so its tone flows like a person's.
+  if (CLOUD_TTS_KEY && Date.now() > cloudBrokenUntil && spoken.length <= 4500) {
+    setStatus({ engine: "cloud", state: "מדבר" });
+    speakCloud(spoken, done, (why) => {
+      cloudBrokenUntil = Date.now() + 60000;
+      setStatus({ error: `קול אנושי: ${why}` });
+      next();
+    }, mine);
+    return;
+  }
   if (wasBusy) setTimeout(next, 120);
   else next();
 }
