@@ -2573,7 +2573,7 @@ export default function ShoppingList() {
               <>
                 <p style={styles.mailStepText}>הרשימה ({finalItems.length} מוצרים) {currentFamily().order.email ? `תישלח ל-${currentFamily().order.email}` : "תיפתח באפליקציית המייל, ושם בוחרים למי לשלוח"}{currentFamily().order.askCopyEmail && copyEmail ? `. עותק יישלח ל-${copyEmail}` : ""}</p>
                 <div style={styles.mailStepBtns}>
-                  <button onClick={() => setMailStep("password")} className="chalk-btn" style={{ ...styles.confirmBtn, flex: 1 }} autoFocus>
+                  <button onClick={() => { setMailStep("password"); if (faceSend) sendWithFace(); }} className="chalk-btn" style={{ ...styles.confirmBtn, flex: 1 }} autoFocus>
                     כן, להמשיך
                   </button>
                   <button onClick={closeMailStep} className="chalk-btn" style={{ ...styles.confirmBtn, ...styles.mailStepCancel, flex: 1 }}>

@@ -5,6 +5,8 @@
 
 import { sha256 } from "./auth.js";
 
+// Face ID is the default for every family (password-gate.jsx offers it after each typed password
+// until it is on, and starts it by itself when the password screen opens). A new family needs nothing extra.
 export const FAMILIES = {
   // The original family. Its keys on the phone have no prefix, exactly as before,
   // so nothing changes for phones that already use the app.

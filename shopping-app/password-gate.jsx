@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { NAME_KEY, greetingForHour } from "./family-shopping-list.jsx";
 import { speakHe } from "./speech.js";
 import {
@@ -9,7 +9,7 @@ import { startSync, startSyncWithKey, flushNow } from "./sync.js";
 import { trace } from "./debug.js";
 import { ScanFace } from "lucide-react";
 import {
-  faceLoginSupported, hasFaceLogin, faceLoginDeclined, declineFaceLogin, undeclineFaceLogin,
+  faceLoginSupported, hasFaceLogin,
   registerFaceLogin, faceLogin,
 } from "./passkey.js";
 
@@ -75,6 +75,16 @@ export default function PasswordGate({ children }) {
     return () => document.removeEventListener("visibilitychange", onVisibility);
   }, [unlocked, admin]);
 
+  // Each time the password screen opens on a phone with Face ID turned on, Face ID starts by itself.
+  const autoFaceRef = useRef(false);
+  useEffect(() => {
+    if (unlocked) { autoFaceRef.current = false; return; }
+    if (autoFaceRef.current || admin || pickFamily || !family || savedName === null || !faceSupported || !hasFaceLogin()) return;
+    autoFaceRef.current = true;
+    const t = setTimeout(() => { if (document.visibilityState === "visible") loginWithFace(true); }, 400);
+    return () => clearTimeout(t);
+  }, [unlocked, faceSupported, family, admin, pickFamily, savedName]);
+
   // Leaves manager mode: the phone goes back to its own family, untouched.
   function endAdmin() {
     trace("admin end");
@@ -118,7 +128,9 @@ export default function PasswordGate({ children }) {
     setUnlocked(true);
   };
 
-  const loginWithFace = async () => {
+  // auto: started by the app itself when the password screen opens. If the phone doesn't allow
+  // that without a tap, nothing is shown and the big Face ID button is there to tap.
+  const loginWithFace = async (auto = false) => {
     setError("");
     setFaceNote("");
     setFaceBusy(true);
@@ -128,9 +140,9 @@ export default function PasswordGate({ children }) {
         welcome(savedName);
         return;
       }
-      setError("זיהוי הפנים לא הצליח. נסו שוב או הקלידו סיסמה.");
+      if (!auto) setError("זיהוי הפנים לא הצליח. נסו שוב או הקלידו סיסמה.");
     } catch (e) {
-      setError("זיהוי הפנים בוטל או לא הצליח. נסו שוב או הקלידו סיסמה.");
+      if (!auto) setError("זיהוי הפנים בוטל או לא הצליח. נסו שוב או הקלידו סיסמה.");
     } finally {
       setFaceBusy(false);
     }
@@ -152,8 +164,8 @@ export default function PasswordGate({ children }) {
     }
   };
 
+  // "Not now" holds only for this time: Face ID is the default, so it is offered again next time.
   const skipFace = () => {
-    declineFaceLogin();
     setOfferFace(false);
     setUnlocked(true);
   };
@@ -274,10 +286,16 @@ export default function PasswordGate({ children }) {
   };
 
   // Correct password and a known name: open the family's list.
-  const enter = (password, who) => {
+  // Face ID is the default for every family: after a typed password, a phone without it is asked to turn it on.
+  const enter = async (password, who) => {
     trace(`enter family=${currentFamily().id} name=${who ? "yes" : "no"} face=${faceSupported}`);
     try { startSync(password); } catch (e) { trace("startSync error " + e.message); }
-    if (faceSupported && !hasFaceLogin() && !faceLoginDeclined()) {
+    let supported = faceSupported;
+    if (!supported) {
+      try { supported = await Promise.race([faceLoginSupported(), new Promise((r) => setTimeout(() => r(false), 1500))]); } catch { supported = false; }
+      if (supported) setFaceSupported(true);
+    }
+    if (supported && !hasFaceLogin()) {
       speakHe(`${greetingForHour(new Date().getHours())}${who ? `, ${who}` : ""}.`);
       setOfferFace(true);
     } else {
@@ -380,7 +398,7 @@ export default function PasswordGate({ children }) {
         <p style={styles.sub}>הכניסה למשפחה בלבד. {family && faceReady && faceSupported ? "היכנסו עם זיהוי פנים או הקלידו סיסמה." : "הקלידו את הסיסמה כדי להמשיך."}</p>
         {family && faceReady && faceSupported && (
           <>
-            <button type="button" onClick={loginWithFace} disabled={faceBusy} style={{ ...styles.button, ...styles.faceBtn, opacity: faceBusy ? 0.6 : 1 }}>
+            <button type="button" onClick={() => loginWithFace(false)} disabled={faceBusy} style={{ ...styles.button, ...styles.faceBtn, opacity: faceBusy ? 0.6 : 1 }}>
               <ScanFace size={22} style={{ marginInlineEnd: 8, verticalAlign: "-6px" }} />
               כניסה עם זיהוי פנים
             </button>
@@ -401,10 +419,8 @@ export default function PasswordGate({ children }) {
         <button type="button" onClick={submit} disabled={!canSubmit} style={{ ...styles.button, opacity: canSubmit ? 1 : 0.5 }}>
           כניסה
         </button>
-        {family && faceSupported && !faceReady && faceLoginDeclined() && (
-          <button type="button" onClick={() => { undeclineFaceLogin(); setFaceNote("הקלידו את הסיסמה, ומיד אחר כך נפעיל זיהוי פנים."); }} style={styles.linkBtn}>
-            להפעיל כניסה עם זיהוי פנים
-          </button>
+        {family && faceSupported && !faceReady && (
+          <p style={styles.hint}>אחרי הסיסמה אפשר להפעיל כניסה עם זיהוי פנים, ואז לא צריך להקליד אותה שוב.</p>
         )}
         {faceNote && <p style={styles.hint}>{faceNote}</p>}
       </div>
