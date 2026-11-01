@@ -25,22 +25,34 @@ window.addEventListener("pagehide", saveBeforeLeaving);
 // Phones keep an old copy of the site for a while after an update. Ask the server for the
 // newest page, and if its build differs from the one running, load it once.
 const BUILD = typeof __BUILD__ !== "undefined" ? __BUILD__ : "dev";
-(async () => {
+// Checked when the app opens and every time it comes back to the screen: an app on the
+// iPhone home screen is often only resumed, never reloaded, so it would keep the old version.
+async function checkForUpdate() {
   try {
     if (!/github\.io$/.test(location.hostname)) return;
     const res = await fetch(`${location.pathname}?check=${Date.now()}`, { cache: "no-store" });
     const html = await res.text();
     const m = html.match(/name="app-build" content="([^"]+)"/);
     const latest = m && m[1];
-    const tried = sessionStorage.getItem("reloaded-for");
+    let tried = null;
+    try { tried = sessionStorage.getItem("reloaded-for"); } catch (e) { /* no storage */ }
     if (latest && latest !== BUILD && tried !== latest) {
-      sessionStorage.setItem("reloaded-for", latest);
-      location.replace(`${location.pathname}?v=${latest}`);
+      try { sessionStorage.setItem("reloaded-for", latest); } catch (e) { /* no storage */ }
+      saveBeforeLeaving();
+      setTimeout(() => location.replace(`${location.pathname}?v=${latest}`), 300);
     }
   } catch (e) {
     // offline or blocked: keep the copy we have
   }
-})();
+}
+checkForUpdate();
+let lastCheck = Date.now();
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && Date.now() - lastCheck > 5000) {
+    lastCheck = Date.now();
+    checkForUpdate();
+  }
+});
 
 // If something breaks, say so on the screen instead of showing a blank page.
 class ErrorScreen extends React.Component {
