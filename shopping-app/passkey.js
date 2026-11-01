@@ -110,16 +110,18 @@ export const hasAnyFace = () => allSavedFaces().length > 0;
 // So a phone that last opened another family still logs in to its own family with the face.
 export async function anyFaceLogin() {
   const saved = allSavedFaces();
-  // No list of allowed Face IDs: the phone offers every Face ID it keeps for this site
-  // (on iPhone these are passkeys in the Keychain), even ones the app lost its note of.
-  const assertion = await navigator.credentials.get({
-    signal: freshSignal(),
-    publicKey: {
-      challenge: randomBytes(32),
-      userVerification: "required",
-      timeout: 60000,
-    },
-  });
+  // The Face IDs this app saved on the phone are named to it, exactly as before (this is what
+  // always worked). Only when the app has no note of any does it ask the phone for whatever
+  // Face ID it keeps for this site.
+  const publicKey = {
+    challenge: randomBytes(32),
+    userVerification: "required",
+    timeout: 60000,
+  };
+  if (saved.length) {
+    publicKey.allowCredentials = saved.map((x) => ({ type: "public-key", id: fromB64(x.id), transports: ["internal", "hybrid"] }));
+  }
+  const assertion = await navigator.credentials.get({ signal: freshSignal(), publicKey });
   if (!assertion) return null;
   const flags = new Uint8Array(assertion.response.authenticatorData)[32];
   if ((flags & 0x04) === 0) return null;
