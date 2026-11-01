@@ -2,7 +2,7 @@
 // The phone checks the face or finger itself; the app only learns that it succeeded.
 // It is turned on after a correct password, so the phone already belongs to the family.
 
-import { currentFamily } from "./families.js";
+import { currentFamily, FAMILIES } from "./families.js";
 
 // Each family keeps its own Face ID on the phone (the Drayman family's names are unchanged).
 const CRED_KEY = () => currentFamily().passkeyKey;
@@ -80,3 +80,34 @@ export const adminFaceLogin = () => faceLogin([ADMIN_CRED_KEY]);
 // Sending an order: the family's Face ID, or the manager's on the manager's phone.
 export const hasSendFace = () => hasFaceLogin() || hasAdminFace();
 export const sendFaceLogin = () => faceLogin([CRED_KEY(), ADMIN_CRED_KEY]);
+
+// Every Face ID saved on this phone: each family's and the manager's.
+function allSavedFaces() {
+  const out = [];
+  Object.values(FAMILIES).forEach((f) => { const id = ls.get(f.passkeyKey); if (id) out.push({ kind: "family", familyId: f.id, id }); });
+  const a = ls.get(ADMIN_CRED_KEY);
+  if (a) out.push({ kind: "admin", id: a });
+  return out;
+}
+export const hasAnyFace = () => allSavedFaces().length > 0;
+
+// Must run from a tap (or is tried right when the login screen opens). Any Face ID saved on
+// this phone may answer, and the answer tells which one: { kind: "family", familyId } or { kind: "admin" }.
+// So a phone that last opened another family still logs in to its own family with the face.
+export async function anyFaceLogin() {
+  const saved = allSavedFaces();
+  if (!saved.length) return null;
+  const assertion = await navigator.credentials.get({
+    publicKey: {
+      challenge: randomBytes(32),
+      allowCredentials: saved.map((x) => ({ type: "public-key", id: fromB64(x.id), transports: ["internal", "hybrid"] })),
+      userVerification: "required",
+      timeout: 60000,
+    },
+  });
+  if (!assertion) return null;
+  const flags = new Uint8Array(assertion.response.authenticatorData)[32];
+  if ((flags & 0x04) === 0) return null;
+  const got = toB64(assertion.rawId);
+  return saved.find((x) => x.id === got) || null;
+}
