@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { Plus, Check, ShoppingBasket, X, Users, Upload, FileText, Eye, ArrowRight, Send, MessageCircle, Save, History, Trash2, Mic, ScanFace } from "lucide-react";
+import { Plus, Check, ShoppingBasket, X, Users, Upload, FileText, Eye, ArrowRight, Send, MessageCircle, Save, History, Trash2, Mic, ScanFace, RotateCcw } from "lucide-react";
 import { isSendPassword, currentFamily } from "./families.js";
 import { trace } from "./debug.js";
 import { faceLoginSupported, hasFaceLogin, faceLogin } from "./passkey.js";
 import { getSyncStatus } from "./sync.js";
+import { readHistory, recordHistory } from "./history.js";
 import { isInstalled, isIOS, notifyPermission, badgePromptDone, markBadgePromptDone, enableBadge } from "./badge.js";
 import { speakHe, stopSpeaking, primeSpeech, onSpeechStatus, micTone, MIC_HELP } from "./speech.js";
 import { parseCommand, findProduct, findCategory, applyOp, speakItem, prettyHe, normHe, VOICE_HELP, kgOf, unitsOf, withKg, withUnits } from "./voice.js";
@@ -456,6 +457,12 @@ export default function ShoppingList() {
 
 
   const [showSaved, setShowSaved] = useState(false);
+  // Automatic history: every version of the list, with a button to bring one back.
+  const [showHistory, setShowHistory] = useState(false);
+  const [historyList, setHistoryList] = useState([]);
+  const [openHistoryAt, setOpenHistoryAt] = useState(null);
+  const [confirmRestoreAt, setConfirmRestoreAt] = useState(null);
+  const lastRemoteByRef = useRef({ name: "", at: 0 });
   const [savedLists, setSavedLists] = useState([]);
   const [searchDate, setSearchDate] = useState("");
   const [openSavedId, setOpenSavedId] = useState(null);
@@ -610,6 +617,7 @@ export default function ShoppingList() {
       setSyncPulse(true);
       setTimeout(() => setSyncPulse(false), 600);
       const by = e.detail && e.detail.by;
+      if (by) lastRemoteByRef.current = { name: by.name || "", at: Date.now() };
       if (by) {
         setRemoteMsg(by.name ? `הרשימה עודכנה ע״י ${by.name}` : "הרשימה עודכנה מטלפון אחר");
         clearTimeout(hideTimer);
@@ -671,6 +679,37 @@ export default function ShoppingList() {
     } catch (e) {
       console.error("שגיאת שמירה", e);
     }
+  };
+
+  // Every change to the list is kept as a version in the history.
+  useEffect(() => {
+    if (!loaded) return;
+    const r = lastRemoteByRef.current;
+    const by = r.name && Date.now() - r.at < 6000 ? r.name : userName;
+    try { recordHistory(items, by); } catch {}
+  }, [items, loaded]);
+
+  const openHistory = () => {
+    setHistoryList(readHistory().slice().reverse());
+    setOpenHistoryAt(null);
+    setConfirmRestoreAt(null);
+    setShowHistory(true);
+  };
+
+  const restoreVersion = (entry) => {
+    persist(entry.items.map((it) => ({ ...it })), { quiet: true });
+    setConfirmRestoreAt(null);
+    setShowHistory(false);
+    setSaveMsg("הרשימה שוחזרה");
+    speakHe("הרשימה שוחזרה.");
+    setTimeout(() => setSaveMsg(""), 3000);
+  };
+
+  const formatHistoryAt = (ms) => {
+    const d = new Date(ms);
+    const days = ["א׳", "ב׳", "ג׳", "ד׳", "ה׳", "ו׳", "ש׳"];
+    const pad = (n) => String(n).padStart(2, "0");
+    return `יום ${days[d.getDay()]} ${d.getDate()}.${d.getMonth() + 1} · ${pad(d.getHours())}:${pad(d.getMinutes())}`;
   };
 
   useEffect(() => {
@@ -1863,7 +1902,74 @@ export default function ShoppingList() {
       <div style={styles.texture} />
 
       <div style={styles.board}>
-       {showSaved ? (
+       {showHistory ? (
+        <>
+          <h2 style={styles.finalTitle}>היסטוריית הרשימה</h2>
+
+          <div style={styles.finalTopBar}>
+            <button onClick={() => setShowHistory(false)} className="chalk-btn final-top-btn" style={styles.finalTopBtn}>
+              <ArrowRight size={16} style={{ marginInlineEnd: 6, verticalAlign: "-3px" }} />
+              חזור
+            </button>
+          </div>
+
+          <p style={{ ...styles.pickHint, padding: "0 8px 10px" }}>
+            כל שינוי ברשימה נשמר כאן אוטומטית. בוחרים גרסה ולוחצים ״שחזר״ כדי להחזיר אותה.
+          </p>
+
+          <div style={styles.pickScroll}>
+            {historyList.length === 0 && (
+              <p style={{ ...styles.pickHint, padding: "14px 8px" }}>עדיין אין גרסאות שמורות.</p>
+            )}
+            {historyList.map((h, idx) => {
+              const open = openHistoryAt === h.at;
+              const toBuy = h.items.filter((it) => !it.done);
+              const done = h.items.length - toBuy.length;
+              return (
+                <div key={h.at + "-" + idx} style={styles.savedCard}>
+                  <button onClick={() => { setOpenHistoryAt(open ? null : h.at); setConfirmRestoreAt(null); }} style={styles.savedHeader}>
+                    <span style={styles.savedDate}>
+                      {formatHistoryAt(h.at)}
+                      {idx === 0 && <span style={{ fontSize: "0.75em", opacity: 0.7 }}> · הרשימה הנוכחית</span>}
+                      {h.by && <span style={{ display: "block", fontSize: "0.75em", opacity: 0.7 }}>{h.by}</span>}
+                    </span>
+                    <span style={styles.savedCount}>{toBuy.length} מוצרים{done ? ` · ${done} נאספו` : ""}</span>
+                  </button>
+                  {open && (
+                    <div style={styles.savedBody}>
+                      {toBuy.length === 0 && <div style={styles.savedLine}>הרשימה ריקה</div>}
+                      {sortByDept(toBuy).map((it, i) => (
+                        <div key={i} style={styles.savedLine}>
+                          {formatListLine({ qty: unitsOf(it), kg: kgOf(it), name: it.name })}
+                        </div>
+                      ))}
+                      {idx > 0 && (
+                        <div style={styles.savedActions}>
+                          {confirmRestoreAt === h.at ? (
+                            <>
+                              <button onClick={() => restoreVersion(h)} className="chalk-btn" style={{ ...styles.finalTopBtn, ...styles.finalSendBtn }}>
+                                כן, לשחזר
+                              </button>
+                              <button onClick={() => setConfirmRestoreAt(null)} className="chalk-btn" style={styles.finalTopBtn}>
+                                ביטול
+                              </button>
+                            </>
+                          ) : (
+                            <button onClick={() => setConfirmRestoreAt(h.at)} className="chalk-btn" style={{ ...styles.finalTopBtn, ...styles.finalSendBtn }}>
+                              <RotateCcw size={16} style={{ marginInlineEnd: 6, verticalAlign: "-3px" }} />
+                              שחזר את הרשימה הזו
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </>
+       ) : showSaved ? (
         <>
           <h2 style={styles.finalTitle}>רשימות קודמות</h2>
 
@@ -2056,6 +2162,10 @@ export default function ShoppingList() {
             <button onClick={() => setShowSaved(true)} className="chalk-btn" style={styles.listActionBtn}>
               <History size={12} style={{ marginInlineEnd: 3, verticalAlign: "-2px" }} />
               רשימות קודמות
+            </button>
+            <button onClick={openHistory} className="chalk-btn" style={styles.listActionBtn}>
+              <RotateCcw size={12} style={{ marginInlineEnd: 3, verticalAlign: "-2px" }} />
+              היסטוריה
             </button>
             <button onClick={() => setShowImport(true)} className="chalk-btn" style={styles.listActionBtn}>
               <Upload size={12} style={{ marginInlineEnd: 3, verticalAlign: "-2px" }} />
