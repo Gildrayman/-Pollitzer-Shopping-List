@@ -2186,7 +2186,7 @@ export default function ShoppingList() {
             </button>
             <button onClick={exitAndSave} className="chalk-btn" style={styles.listActionBtn}>
               <LogOut size={12} style={{ marginInlineEnd: 3, verticalAlign: "-2px" }} />
-              יציאה ושמירה
+              שמירה ויציאה
             </button>
           </div>
 

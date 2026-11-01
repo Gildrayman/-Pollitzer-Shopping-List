@@ -78,7 +78,7 @@ export default function PasswordGate({ children }) {
     return () => document.removeEventListener("visibilitychange", onVisibility);
   }, [unlocked, admin]);
 
-  // "יציאה ושמירה" in the app: back to the login screen (the list was already saved).
+  // "שמירה ויציאה" in the app: back to the login screen (the list was already saved).
   useEffect(() => {
     const onLock = () => {
       skipAutoFaceRef.current = true; // after "exit", wait for a tap instead of logging straight back in
