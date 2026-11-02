@@ -5,7 +5,7 @@ import {
   FAMILIES, familyForPassword, rememberedFamily, currentFamily, setFamily, restoreFamily,
   isAdminPassword, adminFamilyKey,
 } from "./families.js";
-import { startSync, startSyncWithKey, flushNow } from "./sync.js";
+import { startSync, startSyncWithKey, flushNow, needsNewPassword } from "./sync.js";
 import { trace } from "./debug.js";
 import { ScanFace } from "lucide-react";
 import {
@@ -124,6 +124,10 @@ export default function PasswordGate({ children }) {
     setFaceBusy(true);
     try {
       if (await faceLogin()) {
+        if (needsNewPassword()) {
+          setError(`הסיסמה של ${currentFamily().name} השתנתה. הקלידו פעם אחת את הסיסמה החדשה. זיהוי הפנים יישאר.`);
+          return;
+        }
         startSync();
         welcome(savedName);
         return;

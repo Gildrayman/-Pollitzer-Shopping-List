@@ -6,7 +6,7 @@
 // app used inside Claude.ai. Keys with shared=false (like the name) stay on this phone.
 
 import { sha256 } from "./auth.js";
-import { localKey } from "./families.js";
+import { localKey, currentFamily, isRetiredKey, xorHex } from "./families.js";
 
 // The address of the family's Firebase Realtime Database, for example
 // "https://drayman-shopping-default-rtdb.europe-west1.firebasedatabase.app".
@@ -227,6 +227,15 @@ export function startSync(password) {
   if (!FIREBASE_DB_URL || typeof EventSource === "undefined") { setStatus("local"); return; }
   const key = ls.get(SYNC_KEY());
   if (!key) { setStatus("local"); return; }
+  // A key from the family's cancelled password is never used.
+  if (isRetiredKey(currentFamily(), key)) { setStatus("local"); return; }
+  if (password && currentFamily().migrateFrom && !fs.get("drayman-sync-moved")) {
+    const fam = currentFamily();
+    moveFamilyData(fam, key, password).then(() => {
+      if (localKey("") === fam.keyPrefix) startSync();
+    });
+    return;
+  }
   const path = `families/${key}`;
   if (path === familyPath && source && source.readyState !== 2) return;
   familyPath = path;
@@ -239,6 +248,42 @@ export function startSyncWithKey(key) {
   if (key) ls.set(SYNC_KEY(), key);
   startSync();
 }
+
+// After a family's password changes: copies its lists from the old password's place
+// on the server to the new one (keys the new place lacks), then empties
+// the old place so the old password reaches nothing. Runs once per phone.
+async function moveFamilyData(fam, newKey, password) {
+  const base = FIREBASE_DB_URL.replace(/\/+$/, "");
+  try {
+    const oldKey = xorHex(fam.migrateFrom.masked, sha256(`migrate|${fam.id}|${password.trim()}`));
+    if (sha256(oldKey) !== fam.migrateFrom.keyHash) return;
+    const now = await fetch(`${base}/families/${newKey}.json`).then((r) => (r.ok ? r.json() : Promise.reject(r.status)));
+    const old = await fetch(`${base}/families/${oldKey}.json`).then((r) => (r.ok ? r.json() : Promise.reject(r.status)));
+    if (old && typeof old === "object" && Object.keys(old).length) {
+      // Only what the new place doesn't have yet, so nothing newer is replaced.
+      const have = now && typeof now === "object" ? now : {};
+      const missing = {};
+      for (const [k, v] of Object.entries(old)) if (!(k in have)) missing[k] = v;
+      if (Object.keys(missing).length) {
+        const res = await fetch(`${base}/families/${newKey}.json`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(missing),
+        });
+        if (!res.ok) throw new Error("copy " + res.status);
+      }
+      const del = await fetch(`${base}/families/${oldKey}.json`, { method: "DELETE" });
+      if (!del.ok) throw new Error("delete " + del.status);
+    }
+    ls.set(fam.keyPrefix + "drayman-sync-moved", String(Date.now()));
+  } catch (e) {
+    // Not now (no internet?): the list on this phone is still sent to the new place,
+    // and the move is tried again at the next sign-in.
+  }
+}
+
+// The family's password changed and this phone still has the old one.
+export const needsNewPassword = () => isRetiredKey(currentFamily(), ls.get(SYNC_KEY()));
 
 export const hasSyncKey = () => !!ls.get(SYNC_KEY());
 
