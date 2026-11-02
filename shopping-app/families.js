@@ -29,8 +29,16 @@ export const FAMILIES = {
   },
   eshel: {
     id: "eshel",
-    passwordHash: "1b65c85c905923777c0084ae775bfd5c6eef4fa3f0193d6964870a6e930a78cb",
-    sendPasswordHash: "1b65c85c905923777c0084ae775bfd5c6eef4fa3f0193d6964870a6e930a78cb",
+    // Password changed 2.11.2026; the old one no longer opens anything.
+    passwordHash: "8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92",
+    sendPasswordHash: "8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92",
+    // The family's lists moved from the old password's place on the server to the
+    // new one. The old place is locked with the new password, so only someone who
+    // knows the new password can move the data; after the move it is emptied.
+    migrateFrom: {
+      masked: "072ef927a8f21e8e091bb7da1cbb6976189b0c92fe1eafe4dd9eb91de8f7d4b1",
+      keyHash: "c3f54e7d4b624b4096ca77ecc43ccaa946f70045bfc0482599487f51d841cf72",
+    },
     name: "משפחת אשל",
     members: ["טלי", "דני", "שי", "שני", "שחר"],
     namePlaceholder: "למשל: טלי",
@@ -125,16 +133,19 @@ export const isAdminPassword = (value) => sha256(String(value || "").trim()) ===
 // manager can open a family without knowing its password. A family missing here
 // is opened with its own password once on each device, then remembered.
 const ADMIN_LOCKED_KEYS = {
-  eshel: "e28c41f5d1b7cb31b9a2898b30479e1430f122e157cb639b811a561f5ca1b7c5",
+  eshel: "1edacfe382b6e1ab8c31acf049f37820b5cd984ea01c1d2f11ac89ced5dd7e69",
 };
-const xorHex = (a, b) => [...a].map((c, i) => (parseInt(c, 16) ^ parseInt(b[i], 16)).toString(16)).join("");
+export const xorHex = (a, b) => [...a].map((c, i) => (parseInt(c, 16) ^ parseInt(b[i], 16)).toString(16)).join("");
+
+// A server key that belonged to a family's old, cancelled password.
+export const isRetiredKey = (f, key) => !!(f && f.migrateFrom && key && sha256(key) === f.migrateFrom.keyHash);
 
 // The server key of a family for the manager, or null if this device doesn't know it yet.
 export function adminFamilyKey(id, adminPassword) {
   const f = FAMILIES[id];
   if (!f) return null;
   const known = ls.get(f.keyPrefix + "drayman-sync-key");
-  if (known) return known;
+  if (known && !isRetiredKey(f, known)) return known;
   const locked = ADMIN_LOCKED_KEYS[id];
   // Without the typed manager password (manager Face ID) only keys this phone already knows are used.
   if (!locked || !String(adminPassword || "").trim()) return null;
