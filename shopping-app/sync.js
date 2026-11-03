@@ -48,7 +48,6 @@ let connPrefix = null;
 const sameFamily = () => connPrefix === localKey("");
 let source = null;
 let status = FIREBASE_DB_URL ? "connecting" : "local";
-let flushing = false;
 let retryTimer = null;
 
 const setStatus = (s) => {
@@ -65,39 +64,168 @@ const notify = (keys, by) => {
 
 const baseUrl = () => `${FIREBASE_DB_URL.replace(/\/+$/, "")}/${familyPath}`;
 
-// Sends every change not yet confirmed by the server, in one request.
-// leaving: the app is being closed or hidden; the request is sent even if
-// another one is on its way, and the browser finishes it after the page is gone.
-async function flush(leaving = false) {
-  if (!familyPath || !sameFamily() || (flushing && !leaving)) return;
+// What this phone last knew the family copy held, per key. A change is merged
+// against it, so two phones changing the list at the same moment both keep
+// their change (before, the later one replaced the whole list and the other was lost).
+const BASE_KEY = () => localKey("drayman-sync-base");
+const readBase = (bk = BASE_KEY()) => { try { return JSON.parse(ls.get(bk) || "{}"); } catch { return {}; } };
+const setBase = (key, value, bk = BASE_KEY()) => {
+  const b = readBase(bk);
+  if (b[key] === value) return;
+  b[key] = value;
+  ls.set(bk, JSON.stringify(b));
+};
+// The server's version tag for each key and the value it belongs to, so a write goes
+// through only if nobody else wrote in between (otherwise the server returns its copy to merge with).
+const etags = {};
+// After a change arrives from another phone, the new tag is fetched in the background,
+// so this phone's next tap is sent in one go.
+async function refreshTag(url, key) {
+  try {
+    const res = await fetch(`${url}/${encodeURIComponent(key)}.json`, { headers: { "X-Firebase-ETag": "true" } });
+    const tag = res.headers.get("ETag");
+    if (!res.ok || !tag) return;
+    const v = await res.json();
+    etags[url + key] = { tag, value: v === null ? null : typeof v === "string" ? v : JSON.stringify(v) };
+  } catch {}
+}
+
+// Merges this phone's change (base -> local) into what the server has now.
+//  - lists of things with an id (the shopping list, saved lists, own products):
+//    added, removed and changed entries are carried over one by one;
+//  - lists of names (removed products): added and removed names;
+//  - tables (notes, renamed products): changed and removed entries.
+// Anything else: this phone's value, as before.
+const sameJSON = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+const isObj = (v) => v && typeof v === "object" && !Array.isArray(v);
+const hasIds = (arr) => arr.every((x) => isObj(x) && x.id !== undefined);
+function merge3(baseStr, localStr, serverStr) {
+  if (serverStr === null || serverStr === undefined || serverStr === baseStr) return localStr;
+  if (localStr === baseStr) return serverStr;
+  const base = parse(baseStr), local = parse(localStr), server = parse(serverStr);
+  if (Array.isArray(local) && Array.isArray(server)) {
+    const b = Array.isArray(base) ? base : server;
+    if (hasIds(local) && hasIds(server) && hasIds(b)) return JSON.stringify(mergeById(b, local, server));
+    if ([...local, ...server, ...b].every((x) => typeof x === "string")) {
+      const removed = b.filter((x) => !local.includes(x));
+      const out = server.filter((x) => !removed.includes(x));
+      for (const x of local) if (!b.includes(x) && !out.includes(x)) out.push(x);
+      return JSON.stringify(out);
+    }
+    return localStr;
+  }
+  if (isObj(local) && isObj(server)) {
+    const b = isObj(base) ? base : server;
+    const out = { ...server };
+    for (const k of Object.keys(b)) if (!(k in local)) delete out[k];
+    for (const [k, v] of Object.entries(local)) if (!sameJSON(v, b[k])) out[k] = v;
+    return JSON.stringify(out);
+  }
+  return localStr;
+}
+function mergeById(base, local, server) {
+  const baseById = new Map(base.map((x) => [x.id, x]));
+  const localIds = new Set(local.map((x) => x.id));
+  // Removed on this phone.
+  let out = server.filter((x) => !(baseById.has(x.id) && !localIds.has(x.id)));
+  // Changed on this phone (and still there on the server).
+  out = out.map((x) => {
+    const mine = local.find((l) => l.id === x.id);
+    return mine && baseById.has(x.id) && !sameJSON(mine, baseById.get(x.id)) ? mine : x;
+  });
+  // Added on this phone, in this phone's order, at the top as the app adds them.
+  const added = [];
+  for (const it of local) {
+    if (baseById.has(it.id) || out.some((x) => x.id === it.id)) continue;
+    // The same product added on both phones at once is kept once.
+    const twin = typeof it.name === "string" && "done" in it
+      ? out.find((x) => typeof x.name === "string" && x.name.trim() === it.name.trim() && !!x.done === !!it.done && !baseById.has(x.id))
+      : null;
+    if (twin) continue;
+    added.push(it);
+  }
+  return [...added, ...out];
+}
+
+// Writes one key only if the server still has what this phone merged with.
+// Returns the value now on the server.
+async function putKey(url, key, value, base, keepalive) {
+  let local = value;
+  let server = base;
+  for (let tries = 0; tries < 6; tries++) {
+    const known = etags[url + key];
+    const res = await fetch(`${url}/${encodeURIComponent(key)}.json`, {
+      method: "PUT",
+      keepalive,
+      headers: { "Content-Type": "application/json", "X-Firebase-ETag": "true", "if-match": known && known.value === server ? known.tag : "unknown" },
+      body: JSON.stringify(local),
+    });
+    const tag = res.headers.get("ETag");
+    if (res.ok) {
+      if (tag) etags[url + key] = { tag, value: local };
+      return local;
+    }
+    if (res.status !== 412) throw new Error("HTTP " + res.status);
+    // Someone else wrote in between (or the tag isn't known): merge with their copy.
+    const got = await res.json();
+    server = got === null ? null : typeof got === "string" ? got : JSON.stringify(got);
+    if (tag) etags[url + key] = { tag, value: server };
+    local = merge3(base, value, server);
+    if (server !== null && local === server) return local;
+  }
+  throw new Error("busy");
+}
+
+// Sends every change not yet confirmed by the server. Each key goes on its own,
+// so a tap on the list is never held up by another key still on its way.
+// leaving: the app is being closed or hidden (the browser finishes the requests after the page is gone).
+const inFlight = new Set();
+function flush(leaving = false) {
+  if (!familyPath || !sameFamily()) return;
   // Kept for this send, in case the manager switches family while it is on its way.
   const pk = PENDING_KEY();
-  const url = `${baseUrl()}.json`;
+  const bk = BASE_KEY();
+  const url = baseUrl();
+  const prefix = localKey("");
   const pending = readPending(pk);
-  const keys = Object.keys(pending);
+  const keys = Object.keys(pending).filter((k) => !inFlight.has(url + k));
   if (!keys.length) return;
-  flushing = true;
   const name = fs.get(MEMBER_NAME_KEY) || "";
-  try {
-    const res = await fetch(url, {
-      method: "PATCH",
-      keepalive: leaving,
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...pending, [LAST_CHANGE]: { device: deviceId, name, at: Date.now() } }),
+  // Who changed it is sent first, so other phones can say "updated by ..." when the change lands.
+  fetch(`${url}/${LAST_CHANGE}.json`, {
+    method: "PUT",
+    keepalive: leaving,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ device: deviceId, name, at: Date.now() }),
+  }).catch(() => {});
+  for (const k of keys) {
+    const sent = pending[k];
+    inFlight.add(url + k);
+    const base = readBase(bk);
+    putKey(url, k, sent, k in base ? base[k] : undefined, leaving).then((onServer) => {
+      inFlight.delete(url + k);
+      // Drop only what was sent; anything changed meanwhile stays queued.
+      const now = readPending(pk);
+      if (now[k] === sent) {
+        delete now[k];
+        writePending(now, pk);
+        setBase(k, onServer, bk);
+        // Merged with another phone's change: show the joined list here too.
+        if (onServer !== sent && localKey("") === prefix) {
+          ls.set(prefix + k, onServer);
+          notify([k], null);
+        }
+      } else {
+        // Changed again while sending: the next send merges the newer change on top.
+        setBase(k, sent, bk);
+        setTimeout(flush, 0);
+      }
+    }, () => {
+      inFlight.delete(url + k);
+      clearTimeout(retryTimer);
+      retryTimer = setTimeout(flush, 5000);
     });
-    if (!res.ok) throw new Error("HTTP " + res.status);
-    // Drop only what was sent; anything changed meanwhile stays queued.
-    const now = readPending(pk);
-    for (const k of keys) if (now[k] === pending[k]) delete now[k];
-    writePending(now, pk);
-  } catch (e) {
-    clearTimeout(retryTimer);
-    retryTimer = setTimeout(flush, 5000);
-    flushing = false;
-    return;
   }
-  flushing = false;
-  if (Object.keys(readPending()).length) setTimeout(flush, 300);
 }
 
 // Applies data from the server to this phone. Keys with a change still on its
@@ -109,7 +237,10 @@ function applyRemote(entries, by) {
     if (k === LAST_CHANGE || k in pending) continue;
     if (v === null || v === undefined) continue;
     const str = typeof v === "string" ? v : JSON.stringify(v);
+    setBase(k, str);
     if (fs.get(k) !== str) { fs.set(k, str); changed.push(k); }
+    const known = familyPath && etags[baseUrl() + k];
+    if (familyPath && (!known || known.value !== str)) refreshTag(baseUrl(), k);
   }
   notify(changed, by);
 }
@@ -189,7 +320,14 @@ function connect() {
       applyRemote(entries, by);
     } else {
       const key = path.replace(/^\//, "").split("/")[0];
-      if (key === LAST_CHANGE) return;
+      if (key === LAST_CHANGE) {
+        // Another phone is about to change something: name it, as the app shows "updated by ...".
+        const last = path === `/${LAST_CHANGE}` ? data : null;
+        if (last && last.device && last.device !== deviceId) {
+          window.dispatchEvent(new CustomEvent("family-sync", { detail: { keys: [], by: last } }));
+        }
+        return;
+      }
       applyRemote({ [key]: data }, null);
     }
     flush();
