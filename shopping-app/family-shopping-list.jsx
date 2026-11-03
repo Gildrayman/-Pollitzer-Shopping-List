@@ -166,6 +166,8 @@ const NOTES_KEY = "family-shopping-list-note-overrides";
 const NAMES_KEY = "family-shopping-list-name-overrides";
 const CURRENT_KEY = "family-shopping-list-current-saved-id";
 const HIDDEN_KEY = "family-shopping-list-hidden-products";
+// Built-in products the family moved to another category: { original name: category id }.
+const MOVES_KEY = "family-shopping-list-category-moves";
 const COPY_EMAIL_KEY = "family-shopping-list-copy-email";
 
 export function greetingForHour(h) {
@@ -315,11 +317,21 @@ function stripWhatsAppPrefix(line) {
 // Products the family added through the "מוצר חדש" tab. Kept in sync from component state on every render,
 // so the helpers below can see them too.
 let customCatalog = [];
+// Built-in products moved to another category (kept in sync from component state, like customCatalog).
+let categoryMoves = {};
+// The category a built-in product shows in: where the family moved it, or where it was born.
+const builtinCategory = (name, home) =>
+  Object.prototype.hasOwnProperty.call(categoryMoves, name.trim()) ? categoryMoves[name.trim()] : home;
+// Every built-in product with the category it shows in now.
+const builtinProducts = () =>
+  Object.entries(COMMON_ITEMS).flatMap(([home, list]) => list.map((p) => ({ ...p, cat: builtinCategory(p.name, home) })));
 
 function guessCategory(text) {
   const t = text.toLowerCase();
   const custom = customCatalog.find((p) => p.name.trim().toLowerCase() === t.trim());
   if (custom) return custom.category;
+  const moved = builtinProducts().find((p) => p.name.trim().toLowerCase() === t.trim() || displayName(p.name).trim().toLowerCase() === t.trim());
+  if (moved) return moved.cat;
   for (const [cat, list] of Object.entries(COMMON_ITEMS)) {
     if (list.some((it) => t.includes(it.name.toLowerCase().split(" ")[0]))) return cat;
   }
@@ -403,6 +415,9 @@ function getCatalogNote(itemName) {
   return custom && custom.note ? custom.note : "";
 }
 
+// Asked about before every way out of the app.
+const EXIT_REMINDER_ITEMS = ["חלב", "ביצים", "גבינה צהובה", "ירקות"];
+
 const APP_BUILD = typeof __BUILD__ !== "undefined" ? __BUILD__ : "dev";
 
 export default function ShoppingList() {
@@ -482,6 +497,13 @@ export default function ShoppingList() {
   // Built-in products the family removed from the catalog (by their original name).
   const [hiddenProducts, setHiddenProducts] = useState([]);
   nameOverrides = nameMap;
+  const [moveMap, setMoveMap] = useState({});
+  categoryMoves = moveMap;
+  // The product whose menu (move to another category / delete) is open.
+  const [productMenu, setProductMenu] = useState(null);
+  // "Did you remember...?" shown before every way out of the app (exit, mail, WhatsApp).
+  // { run: function to continue } or { href: link to open }.
+  const [exitReminder, setExitReminder] = useState(null);
 
   const setProductNote = async (name, text) => {
     const key = name.trim();
@@ -566,6 +588,12 @@ export default function ShoppingList() {
       if (res && res.value) setHiddenProducts(JSON.parse(res.value));
     } catch {
       // no removed products yet
+    }
+    try {
+      const res = await window.storage.get(MOVES_KEY, true);
+      if (res && res.value) setMoveMap(JSON.parse(res.value));
+    } catch {
+      // no moved products yet
     }
   }, []);
 
@@ -869,7 +897,7 @@ export default function ShoppingList() {
   // Built-in catalog for a category plus the products the family added to it.
   // origName stays the catalog's own name, so a renamed product can be renamed again.
   const catalogFor = (cat) => [
-    ...(COMMON_ITEMS[cat] || []).filter((p) => !hiddenProducts.includes(p.name.trim())),
+    ...builtinProducts().filter((p) => p.cat === cat && !hiddenProducts.includes(p.name.trim())).map(({ cat: _c, ...p }) => p),
     ...customProducts.filter((p) => p.category === cat).map((p) => ({ ...p, custom: true })),
   ].map((p) => ({ ...p, origName: p.name, name: displayName(p.name) })).sort(byName);
 
@@ -951,7 +979,40 @@ export default function ShoppingList() {
     else persistHidden([...hiddenProducts, item.origName.trim()]);
   };
 
-  const hiddenIn = (cat) => (COMMON_ITEMS[cat] || []).filter((p) => hiddenProducts.includes(p.name.trim()));
+  const hiddenIn = (cat) => builtinProducts().filter((p) => p.cat === cat && hiddenProducts.includes(p.name.trim()));
+
+  const persistMoves = async (next) => {
+    setMoveMap(next);
+    try {
+      await window.storage.set(MOVES_KEY, JSON.stringify(next), true);
+    } catch (e) {
+      console.error("שגיאת שמירה", e);
+    }
+  };
+
+  // Moves a product to another category (tab), for the whole family. A product already
+  // on the list moves with it, so the summary and the order show it in its new place.
+  const moveProduct = (item, toCat) => {
+    if (!item || !toCat) return;
+    if (item.custom) {
+      persistCustom(customProducts.map((p) => (p.id === item.id ? { ...p, category: toCat } : p)));
+    } else {
+      const orig = item.origName.trim();
+      const home = Object.entries(COMMON_ITEMS).find(([, list]) => list.some((p) => p.name.trim() === orig));
+      const next = { ...moveMap };
+      if (home && home[0] === toCat) delete next[orig];
+      else next[orig] = toCat;
+      persistMoves(next);
+    }
+    const name = item.name.trim();
+    if (items.some((it) => it.name.trim() === name && it.category !== toCat)) {
+      persist(items.map((it) => (it.name.trim() === name ? { ...it, category: toCat } : it)));
+    }
+    setProductMenu(null);
+    // Show it in its new tab, highlighted, so the move is visible at once.
+    setActiveTab(toCat);
+    setFlashName(name);
+  };
   const restoreHidden = (cat) => {
     const names = hiddenIn(cat).map((p) => p.name.trim());
     persistHidden(hiddenProducts.filter((n) => !names.includes(n)));
@@ -2207,7 +2268,7 @@ export default function ShoppingList() {
               <Upload size={12} style={{ marginInlineEnd: 3, verticalAlign: "-2px" }} />
               ייבוא
             </button>
-            <button onClick={exitAndSave} className="chalk-btn" style={styles.listActionBtn}>
+            <button onClick={() => setExitReminder({ run: exitAndSave })} className="chalk-btn" style={styles.listActionBtn}>
               <LogOut size={12} style={{ marginInlineEnd: 3, verticalAlign: "-2px" }} />
               שמירה ויציאה
             </button>
@@ -2313,9 +2374,9 @@ export default function ShoppingList() {
                     <EditableNote note={getCatalogNote(item.name)} onSave={(t) => setProductNote(item.name, t)} />
                   </span>
                   <button
-                    onClick={() => removeProduct(item)}
+                    onClick={() => setProductMenu({ ...item, fromCat: activeTab })}
                     style={styles.removeProdBtn}
-                    aria-label={`מחק ${item.name} מהקטלוג`}
+                    aria-label={`מחיקה או העברה של ${item.name}`}
                   >
                     <X size={14} />
                   </button>
@@ -2376,7 +2437,7 @@ export default function ShoppingList() {
               href={whatsappHref}
               target="_blank"
               rel="noopener noreferrer"
-              onClick={(e) => { if (finalItems.length === 0) { e.preventDefault(); listEmptyMsg(); } }}
+              onClick={(e) => { e.preventDefault(); if (finalItems.length === 0) listEmptyMsg(); else setExitReminder({ href: whatsappHref }); }}
               className="chalk-btn final-top-btn"
               style={styles.finalTopBtn}
             >
@@ -2385,7 +2446,7 @@ export default function ShoppingList() {
             </a>
             {currentFamily().mailEnabled && (
             <button
-              onClick={askSendMail}
+              onClick={() => { if (finalItems.length === 0) listEmptyMsg(); else setExitReminder({ run: askSendMail }); }}
               className="chalk-btn final-top-btn"
               style={{ ...styles.finalTopBtn, ...styles.finalSendBtn }}
             >
@@ -2481,6 +2542,86 @@ export default function ShoppingList() {
        )}
       </div>
 
+
+      {exitReminder && (
+        <div style={{ ...styles.overlay, alignItems: "center", padding: "0 16px", zIndex: 45 }} onClick={() => setExitReminder(null)}>
+          <div style={{ ...styles.sheet, borderRadius: 18, borderBottom: "1px solid #24302622", maxWidth: 340, textAlign: "center" }} onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="exit-rem-title">
+            <h3 id="exit-rem-title" style={{ ...styles.sheetTitle, marginBottom: 10 }}>האם זכרת להוסיף?</h3>
+            <ul style={{ listStyle: "none", padding: 0, margin: "0 0 16px", fontFamily: "'Heebo', sans-serif", fontSize: "1.05rem", fontWeight: 600, color: "#243026", lineHeight: 1.9 }}>
+              {EXIT_REMINDER_ITEMS.map((n) => <li key={n}>{n}</li>)}
+            </ul>
+            <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
+              {exitReminder.href ? (
+                <a
+                  href={exitReminder.href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={() => setExitReminder(null)}
+                  className="chalk-btn"
+                  style={{ ...styles.finalTopBtn, ...styles.finalSendBtn, textDecoration: "none" }}
+                >
+                  המשך
+                </a>
+              ) : (
+                <button
+                  onClick={() => { const r = exitReminder.run; setExitReminder(null); r && r(); }}
+                  className="chalk-btn"
+                  style={{ ...styles.finalTopBtn, ...styles.finalSendBtn }}
+                  autoFocus
+                >
+                  המשך
+                </button>
+              )}
+              <button
+                onClick={() => { setExitReminder(null); setShowSaved(false); setShowHistory(false); setShowFinal(false); }}
+                className="chalk-btn"
+                style={styles.finalTopBtn}
+              >
+                חזור לרשימה
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {productMenu && (
+        <div style={{ ...styles.overlay, zIndex: 40 }} onClick={() => setProductMenu(null)}>
+          <div style={styles.sheet} onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="prod-menu-title">
+            <div style={styles.sheetHeader}>
+              <h3 id="prod-menu-title" style={styles.sheetTitle}>{productMenu.name}</h3>
+              <button onClick={() => setProductMenu(null)} style={styles.sheetClose} aria-label="ביטול">
+                <X size={20} />
+              </button>
+            </div>
+            <div style={{ overflowY: "auto" }}>
+              <p style={styles.mailStepText}>להעביר לקטגוריה אחרת:</p>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8 }}>
+                {CATEGORIES.filter((c) => c.id !== productMenu.fromCat).map((c) => (
+                  <button
+                    key={c.id}
+                    onClick={() => moveProduct(productMenu, c.id)}
+                    className="chalk-btn"
+                    style={{ padding: "9px 12px", borderRadius: 10, border: `2px solid ${c.color}`, background: `${c.color}33`, color: "#243026", fontFamily: "'Heebo', sans-serif", fontWeight: 600, fontSize: "0.9rem", cursor: "pointer" }}
+                  >
+                    {c.label}
+                  </button>
+                ))}
+              </div>
+              <button
+                onClick={() => { const it = productMenu; setProductMenu(null); removeProduct(it); }}
+                className="chalk-btn"
+                style={{ ...styles.confirmBtn, width: "100%", background: "#C1554B", display: "flex", alignItems: "center", justifyContent: "center", gap: 6, marginTop: 18 }}
+              >
+                <Trash2 size={16} />
+                מחיקה מהקטלוג
+              </button>
+              <button onClick={() => setProductMenu(null)} className="chalk-btn" style={{ ...styles.confirmBtn, ...styles.mailStepCancel, width: "100%", marginTop: 8 }}>
+                ביטול
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showLeavePrompt && (
         <div style={{ ...styles.overlay, alignItems: "center", padding: "0 16px" }} onClick={() => setShowLeavePrompt(false)}>
