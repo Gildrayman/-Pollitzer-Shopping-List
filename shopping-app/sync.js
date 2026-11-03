@@ -147,6 +147,52 @@ function mergeById(base, local, server) {
   return [...added, ...out];
 }
 
+// A full snapshot of the family copy arrived (the app opened or reconnected). Unlike a
+// live edit, this is reconciled so that nothing this phone already shows is dropped:
+// if the snapshot lost items this phone has AND last knew the family copy held, they are
+// brought back (for example a phone on an older version overwrote the whole list). The
+// only side is that an item removed on another phone while this phone was offline can come
+// back; it can simply be removed again, and the history keeps every state either way.
+function reloadMergeIds(base, local, server) {
+  const baseById = new Map(base.map((x) => [x.id, x]));
+  const localById = new Map(local.map((x) => [x.id, x]));
+  const localIds = new Set(localById.keys());
+  // Removed on this phone (in the last known copy, gone locally): keep it removed.
+  const removedHere = new Set(base.filter((x) => !localIds.has(x.id)).map((x) => x.id));
+  let out = server.filter((x) => !removedHere.has(x.id));
+  // This phone's own edits win over the snapshot.
+  out = out.map((x) => {
+    const mine = localById.get(x.id);
+    return mine && baseById.has(x.id) && !sameJSON(mine, baseById.get(x.id)) ? mine : x;
+  });
+  const inOut = new Set(out.map((x) => x.id));
+  // Items this phone has that the snapshot lost and this phone did not remove: bring back
+  // (both ones this phone added and ones the family copy used to have but lost).
+  const extra = local.filter((it) => !inOut.has(it.id) && !removedHere.has(it.id));
+  return [...extra, ...out];
+}
+function reloadMerge(baseStr, localStr, serverStr) {
+  if (serverStr === null || serverStr === undefined) return localStr;
+  if (serverStr === baseStr) return localStr;
+  const base = parse(baseStr), local = parse(localStr), server = parse(serverStr);
+  if (Array.isArray(local) && Array.isArray(server) && Array.isArray(base)) {
+    if (hasIds(local) && hasIds(server) && hasIds(base)) return JSON.stringify(reloadMergeIds(base, local, server));
+    if ([...local, ...server, ...base].every((x) => typeof x === "string")) {
+      const removedHere = base.filter((x) => !local.includes(x));
+      const out = server.filter((x) => !removedHere.includes(x));
+      for (const x of local) if (!out.includes(x)) out.push(x);
+      return JSON.stringify(out);
+    }
+  }
+  if (isObj(local) && isObj(server) && isObj(base)) {
+    const out = { ...server };
+    for (const k of Object.keys(base)) if (!(k in local)) delete out[k]; // removed on this phone
+    for (const [k, v] of Object.entries(local)) if (!(k in out) || !sameJSON(v, base[k])) out[k] = v; // brought back + this phone's edits
+    return JSON.stringify(out);
+  }
+  return merge3(baseStr, localStr, serverStr);
+}
+
 // Writes one key only if the server still has what this phone merged with.
 // Returns the value now on the server.
 async function putKey(url, key, value, base, keepalive) {
@@ -317,8 +363,26 @@ function connect() {
       if (kind === "put") {
         // First load: anything this phone has that the family copy lacks is sent up.
         const pending = readPending();
+        const base = readBase();
         for (const k of localSharedKeys()) {
-          if (!(k in entries) && fs.get(k) !== null && !(k in pending)) pending[k] = fs.get(k);
+          const local = fs.get(k);
+          if (local === null || k in pending) continue;
+          // A whole key the family copy is missing: send this phone's copy up.
+          if (!(k in entries)) { pending[k] = local; continue; }
+          // A key the family copy has, but that lost items this phone still holds and
+          // last knew the family copy held too (for example a phone on an older version
+          // overwrote the whole list). Merge them back instead of dropping them, exactly
+          // like a same-time edit between two phones, and send the restored list up.
+          if (k in base && typeof local === "string") {
+            const serverStr = typeof entries[k] === "string" ? entries[k] : JSON.stringify(entries[k]);
+            if (local !== serverStr) {
+              const shape = parse(local);
+              if (Array.isArray(shape) || isObj(shape)) {
+                const merged = reloadMerge(base[k], local, serverStr);
+                if (merged !== serverStr) { fs.set(k, merged); pending[k] = merged; }
+              }
+            }
+          }
         }
         mergeOnce(entries, pending);
         writePending(pending);
