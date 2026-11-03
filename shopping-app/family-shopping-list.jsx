@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import { Plus, Check, ShoppingBasket, X, Users, Upload, FileText, Eye, ArrowRight, Send, MessageCircle, Save, History, Trash2, Mic, ScanFace, RotateCcw, LogOut } from "lucide-react";
 import { isSendPassword, currentFamily } from "./families.js";
 import { trace } from "./debug.js";
-import { faceLoginSupported, sendFaceLogin } from "./passkey.js";
+import { faceLoginSupported, sendFaceLogin, hasSendFace } from "./passkey.js";
 import { getSyncStatus, flushNow } from "./sync.js";
 import { readHistory, recordHistory } from "./history.js";
 import { isInstalled, isIOS, notifyPermission, badgePromptDone, markBadgePromptDone, enableBadge } from "./badge.js";
@@ -728,7 +728,10 @@ export default function ShoppingList() {
       .map((it) => formatListLine({ qty: unitsOf(it), kg: kgOf(it), name: it.name, note: getCatalogNote(it.name) }));
     const text = lines.join("\n");
     setSummaryText(text);
-    window.storage.set(SUMMARY_KEY, text, true).catch(() => {});
+    // Kept on this phone only: each phone builds it from the list. Sending it made the other
+    // phones answer every change with a write of their own, which showed "updated by ..."
+    // and a red badge on the phone that made the change.
+    window.storage.set(SUMMARY_KEY, text, false).catch(() => {});
   }, [items]);
 
   const makeItem = (text, category, qty = "") => ({
@@ -1074,6 +1077,7 @@ export default function ShoppingList() {
       });
     if (toAdd.length) persist([...toAdd.reverse(), ...items]);
     setShowSaved(false);
+    setShowHistory(false);
     setShowFinal(true);
   };
 
@@ -1165,7 +1169,13 @@ export default function ShoppingList() {
     }, 1500);
   };
 
+  const listEmptyMsg = () => {
+    setSaveMsg("הרשימה ריקה, אין מה לשלוח");
+    setTimeout(() => setSaveMsg(""), 2500);
+  };
+
   const askSendMail = async () => {
+    if (finalItems.length === 0) { listEmptyMsg(); return; }
     setMailPw("");
     setMailPwError("");
     if (currentFamily().order.askCopyEmail) {
@@ -1553,6 +1563,7 @@ export default function ShoppingList() {
 
   const startSendPrompt = (kind, heard = "") => {
     setShowSaved(false);
+    setShowHistory(false);
     setShowFinal(true);
     setSendPrompt(kind);
     const where = kind === "mail" ? "המייל" : "הוואטסאפ";
@@ -1596,6 +1607,7 @@ export default function ShoppingList() {
     const product = { id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, name, note: "", category };
     persistCustom([...customProducts, product]);
     setShowSaved(false);
+    setShowHistory(false);
     setShowFinal(false);
     setActiveTab(category);
     pendingRef.current = { kind: "np_add", product: { name, category } };
@@ -1690,6 +1702,7 @@ export default function ShoppingList() {
           } else if (pending.action === "send_mail") {
             // Saying yes is the confirmation; the password is typed on screen.
             setShowSaved(false);
+            setShowHistory(false);
             setShowFinal(true);
             setMailPw("");
             setMailPwError("");
@@ -1748,6 +1761,7 @@ export default function ShoppingList() {
       case "read_category":
       case "goto_category": {
         setShowSaved(false);
+        setShowHistory(false);
         setShowFinal(false);
         setActiveTab(cmd.category);
         const label = catInfo(cmd.category).label;
@@ -1764,6 +1778,13 @@ export default function ShoppingList() {
       case "new_product":
         createProductByVoice(cmd.name, cmd.category);
         return;
+      case "goto_history":
+        setShowFinal(false);
+        setShowSaved(false);
+        setShowHistory(false);
+        openHistory();
+        reply(`${heard} פתחתי את היסטוריית הרשימה. כל שינוי נשמר שם, ואפשר לשחזר גרסה בלחיצה. כדי לחזור אמרו: חזור.`);
+        return;
       case "goto_saved":
         setShowFinal(false);
         setShowSaved(true);
@@ -1775,6 +1796,7 @@ export default function ShoppingList() {
         return;
       case "goto_new_product":
         setShowSaved(false);
+        setShowHistory(false);
         setShowFinal(false);
         setActiveTab("new");
         setNewProdMsg("");
@@ -1789,11 +1811,13 @@ export default function ShoppingList() {
       }
       case "summary":
         setShowSaved(false);
+        setShowHistory(false);
         setShowFinal(true);
         reply(`${heard} עברתי לסיכום. ${listSummary()} כדי לשלוח אמרו: ${currentFamily().mailEnabled ? "שלח במייל" : "שלח בוואטסאפ"}.`);
         return;
       case "back":
         setShowSaved(false);
+        setShowHistory(false);
         setShowFinal(false);
         setShowImport(false);
         reply(`${heard} חזרתי לבחירת המוצרים, ללשונית ${activeTab === "new" ? "מוצר חדש" : catInfo(activeTab).label}.`);
@@ -2352,6 +2376,7 @@ export default function ShoppingList() {
               href={whatsappHref}
               target="_blank"
               rel="noopener noreferrer"
+              onClick={(e) => { if (finalItems.length === 0) { e.preventDefault(); listEmptyMsg(); } }}
               className="chalk-btn final-top-btn"
               style={styles.finalTopBtn}
             >
@@ -2589,7 +2614,7 @@ export default function ShoppingList() {
               <>
                 <p style={styles.mailStepText}>הרשימה ({finalItems.length} מוצרים) {currentFamily().order.email ? `תישלח ל-${currentFamily().order.email}` : "תיפתח באפליקציית המייל, ושם בוחרים למי לשלוח"}{currentFamily().order.askCopyEmail && copyEmail ? `. עותק יישלח ל-${copyEmail}` : ""}</p>
                 <div style={styles.mailStepBtns}>
-                  <button onClick={() => { setMailStep("password"); if (faceSend) sendWithFace(); }} className="chalk-btn" style={{ ...styles.confirmBtn, flex: 1 }} autoFocus>
+                  <button onClick={() => { setMailStep("password"); if (faceSend && hasSendFace()) sendWithFace(); }} className="chalk-btn" style={{ ...styles.confirmBtn, flex: 1 }} autoFocus>
                     כן, להמשיך
                   </button>
                   <button onClick={closeMailStep} className="chalk-btn" style={{ ...styles.confirmBtn, ...styles.mailStepCancel, flex: 1 }}>

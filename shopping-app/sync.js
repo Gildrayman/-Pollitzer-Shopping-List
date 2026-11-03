@@ -188,6 +188,14 @@ function flush(leaving = false) {
   const url = baseUrl();
   const prefix = localKey("");
   const pending = readPending(pk);
+  // A value the family copy already holds needs no sending (and must not tell the other
+  // phones that this phone changed something).
+  const known = readBase(bk);
+  let dropped = false;
+  for (const k of Object.keys(pending)) {
+    if (!inFlight.has(url + k) && k in known && known[k] === pending[k]) { delete pending[k]; dropped = true; }
+  }
+  if (dropped) writePending(pending, pk);
   const keys = Object.keys(pending).filter((k) => !inFlight.has(url + k));
   if (!keys.length) return;
   const name = fs.get(MEMBER_NAME_KEY) || "";

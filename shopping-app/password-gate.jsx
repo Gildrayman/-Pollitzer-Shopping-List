@@ -145,6 +145,9 @@ export default function PasswordGate({ children }) {
     setFaceBusy(true);
     try {
       const r = await anyFaceLogin();
+      // Face ID worked, so it is still on the phone: an earlier failed or cancelled try
+      // must not make the app offer to set it up again after the next typed password.
+      if (r) clearFaceStale();
       if (r && r.kind === "admin") {
         trace("admin login (face)");
         setAdmin({ password: "" });

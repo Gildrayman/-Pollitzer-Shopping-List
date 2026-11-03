@@ -144,18 +144,23 @@ export function prettyHe(s) {
 
 const has = (n, words) => words.some((w) => new RegExp(`(^|\\s)${normHe(w)}(\\s|$)`).test(n));
 
+const SEPARATORS = new Set(["וגם", "ועוד", "וכן"].map(normHe));
+
 // Splits "2 עגבניות ו3 מלפפונים, וגם חלב" into one chunk per product.
 function splitChunks(tokens, products) {
   const productFirst = new Set(products.map((p) => normHe(p.name).split(" ")[0]).filter(Boolean));
   const chunks = [[]];
   for (let i = 0; i < tokens.length; i++) {
     const t = tokens[i];
-    if (t === "וגם" || t === "," || t === "ועוד") { chunks.push([]); continue; }
+    // (Words arrive normalized, so "וגם" is written "וגמ".)
+    if (SEPARATORS.has(t)) { chunks.push([]); continue; }
+    const startsItem = (w) => w != null && (readNumber([w], 0) || KILO.has(w) || productFirst.has(w) ||
+      [...productFirst].some((f) => f.length >= 3 && tokenSim(w, f) >= 0.9));
+    // "ו3 מלפפונים" / "ו-3 מלפפונים" reach here as "ו" and "3".
+    if (t === "ו" && chunks[chunks.length - 1].length && startsItem(tokens[i + 1])) { chunks.push([]); continue; }
     if (t.length > 1 && t.startsWith("ו") && chunks[chunks.length - 1].length) {
       const rest = t.slice(1);
-      const startsItem = readNumber([rest], 0) || KILO.has(rest) || productFirst.has(rest) ||
-        [...productFirst].some((f) => f.length >= 3 && tokenSim(rest, f) >= 0.9);
-      if (startsItem) { chunks.push([rest]); continue; }
+      if (startsItem(rest)) { chunks.push([rest]); continue; }
     }
     chunks[chunks.length - 1].push(t);
   }
@@ -168,17 +173,23 @@ function readChunk(tokens, products) {
   let qty = null, kg = null, setTo = null;
   const rest = [];
   const joined = ` ${tokens.join(" ")} `;
+  // Also when only the end of the name is said ("דנונה פרו 20" for "יוגורט דנונה פרו 20").
+  let best = null;
   for (const p of products) {
-    const pn = normHe(p.name);
-    if (!/\d/.test(pn)) continue;
-    const at = joined.indexOf(` ${pn} `);
-    if (at >= 0) {
-      const before = joined.slice(0, at).trim();
-      const after = joined.slice(at + pn.length + 2).trim();
-      tokens = [before, after].filter(Boolean).join(" ").split(" ").filter(Boolean);
-      rest.push(...pn.split(" "));
-      break;
+    const words = normHe(p.name).split(" ");
+    if (!/\d/.test(words.join(" "))) continue;
+    for (let s = 0; s <= words.length - 2; s++) {
+      const part = words.slice(s).join(" ");
+      if (!/\d/.test(part)) break;
+      if (joined.includes(` ${part} `) && (!best || part.length > best.length)) best = part;
     }
+  }
+  if (best) {
+    const at = joined.indexOf(` ${best} `);
+    const before = joined.slice(0, at).trim();
+    const after = joined.slice(at + best.length + 2).trim();
+    tokens = [before, after].filter(Boolean).join(" ").split(" ").filter(Boolean);
+    rest.push(...best.split(" "));
   }
   for (let i = 0; i < tokens.length; i++) {
     const t = tokens[i];
@@ -253,7 +264,8 @@ export function parseCommand(text, products = []) {
     const name = kept.join(" ");
     if (name || cat) return { type: "new_product", name: prettyHe(name), category: cat };
   }
-  if (has(n, ["רשימות קודמות", "רשימות שמורות", "רשימות ישנות", "היסטוריה", "הרשימות הקודמות"])) return { type: "goto_saved" };
+  if (has(n, ["היסטוריה", "היסטוריית הרשימה", "גרסאות קודמות", "שחזור", "לשחזר"])) return { type: "goto_history" };
+  if (has(n, ["רשימות קודמות", "רשימות שמורות", "רשימות ישנות", "הרשימות הקודמות"])) return { type: "goto_saved" };
   if (has(n, ["ייבוא", "יבוא", "תייבא", "לייבא", "ייבא"])) return { type: "goto_import" };
   if (has(n, ["מוצר חדש", "מוצרים חדשים"]) && words.length <= 5) return { type: "goto_new_product" };
   if (has(n, ["מה יש כאן", "מה יש פה", "מה במחלקה", "מה יש במחלקה", "תקריא את המוצרים", "הקרא את המוצרים", "אילו מוצרים יש", "איזה מוצרים יש", "מה בטאב", "מה בלשונית"])) return { type: "read_here" };
@@ -274,7 +286,9 @@ export function parseCommand(text, products = []) {
   // Verbs may come anywhere ("עגבניות שרי פחות 1"), so pick them out of the whole sentence.
   const found = new Set();
   const tokens = [];
-  for (const w of words) {
+  // A comma between products ("חלב, בננות, גזר") separates them like "וגם".
+  const listWords = normHe(String(text).replace(/,(?!\d)/g, " וגם ")).split(" ");
+  for (const w of listWords) {
     let verb = null;
     for (const t of ["dec", "inc", "remove", "set", "add"]) if (V[t].has(w)) { verb = t; break; }
     if (verb) found.add(verb);
@@ -402,5 +416,5 @@ export const VOICE_HELP =
   "כדי לשנות כמות: תוסיף 3 עגבניות שרי, או תעלה 2 מלפפונים, מוסיף לכמות שכבר יש. תוריד 2 מלפפונים, מחסיר. תשנה מלפפונים ל-4, קובע. " +
   "כדי למחוק מוצר: תמחק גבינה, או תבטל גבינה. " +
   "כדי לשמוע: מה ברשימה, או: מה יש בבשר ודגים, או: מה הכמות של עגבניות שרי. כדי להוסיף מוצר חדש למחלקה: מוצר חדש במבה למחלקת שונות. " +
-  "כדי לעבור לשונית אומרים את שמה, למשל: בשר ודגים, או: מוצרי חלב. ועוד: מה יש כאן, סיכום, רשימות קודמות, מוצר חדש, ייבוא, חזור, שמור, רשימה חדשה, שלח במייל, שלח בוואטסאפ. " +
+  "כדי לעבור לשונית אומרים את שמה, למשל: בשר ודגים, או: מוצרי חלב. ועוד: מה יש כאן, סיכום, רשימות קודמות, היסטוריה, מוצר חדש, ייבוא, חזור, שמור, רשימה חדשה, שלח במייל, שלח בוואטסאפ. " +
   "כדי לסיים אמרו: עצור.";
