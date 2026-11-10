@@ -415,8 +415,22 @@ function getCatalogNote(itemName) {
   return custom && custom.note ? custom.note : "";
 }
 
-// Asked about before every way out of the app.
-const EXIT_REMINDER_ITEMS = ["חלב", "ביצים", "גבינה צהובה", "ירקות"];
+// Asked about before every way out of the app — but only the ones NOT on the list yet.
+const REMINDER_FRUITS = ["אבטיח", "בננות", "תפוחי פינק ליידי", "אפרסקים", "ענבי תלמי", "אפרסמון", "תמרים מגעול", "פקאנים קלופים", "לימונים צהובים"];
+const firstWord = (name) => (name || "").trim().replace(/^[^\u0590-\u05FFA-Za-z0-9]+/, "").split(/[\s,.\-–/()]+/)[0] || "";
+const isReminderFruit = (name) => {
+  const n = (name || "").trim();
+  return REMINDER_FRUITS.some((f) => f === n || displayName(f).trim() === n);
+};
+const EXIT_REMINDER_ITEMS = [
+  { name: "חלב", has: (it) => firstWord(it.name) === "חלב" },
+  { name: "ביצים", has: (it) => ["ביצים", "ביצה"].includes(firstWord(it.name)) },
+  { name: "גבינה צהובה", has: (it) => /גבינה\s+צהובה|גבנ["״׳']?צ/.test(it.name || "") },
+  { name: "ירקות", has: (it) => it.category === "produce" && !isReminderFruit(it.name) },
+];
+// Names from EXIT_REMINDER_ITEMS that no open (not done) list item covers.
+const missingReminders = (openItems) =>
+  EXIT_REMINDER_ITEMS.filter((r) => !openItems.some((it) => r.has(it))).map((r) => r.name);
 
 const APP_BUILD = typeof __BUILD__ !== "undefined" ? __BUILD__ : "dev";
 
@@ -893,6 +907,14 @@ export default function ShoppingList() {
   };
 
   const finalItems = sortByDept(items.filter((it) => !it.done));
+  // Before leaving/sending: remind only about reminder products that are NOT on the list.
+  // If all of them are already ordered, go straight on with no popup.
+  const remindThen = ({ run, href }) => {
+    const missing = missingReminders(items.filter((it) => !it.done));
+    if (missing.length > 0) { setExitReminder({ run, href, missing }); return; }
+    if (href) window.open(href, "_blank", "noopener,noreferrer");
+    else if (run) run();
+  };
 
   // Built-in catalog for a category plus the products the family added to it.
   // origName stays the catalog's own name, so a renamed product can be renamed again.
@@ -2268,7 +2290,7 @@ export default function ShoppingList() {
               <Upload size={12} style={{ marginInlineEnd: 3, verticalAlign: "-2px" }} />
               ייבוא
             </button>
-            <button onClick={() => setExitReminder({ run: exitAndSave })} className="chalk-btn" style={styles.listActionBtn}>
+            <button onClick={() => remindThen({ run: exitAndSave })} className="chalk-btn" style={styles.listActionBtn}>
               <LogOut size={12} style={{ marginInlineEnd: 3, verticalAlign: "-2px" }} />
               שמירה ויציאה
             </button>
@@ -2437,7 +2459,7 @@ export default function ShoppingList() {
               href={whatsappHref}
               target="_blank"
               rel="noopener noreferrer"
-              onClick={(e) => { e.preventDefault(); if (finalItems.length === 0) listEmptyMsg(); else setExitReminder({ href: whatsappHref }); }}
+              onClick={(e) => { if (finalItems.length === 0) { e.preventDefault(); listEmptyMsg(); } else if (missingReminders(finalItems).length > 0) { e.preventDefault(); remindThen({ href: whatsappHref }); } }}
               className="chalk-btn final-top-btn"
               style={styles.finalTopBtn}
             >
@@ -2446,7 +2468,7 @@ export default function ShoppingList() {
             </a>
             {currentFamily().mailEnabled && (
             <button
-              onClick={() => { if (finalItems.length === 0) listEmptyMsg(); else setExitReminder({ run: askSendMail }); }}
+              onClick={() => { if (finalItems.length === 0) listEmptyMsg(); else remindThen({ run: askSendMail }); }}
               className="chalk-btn final-top-btn"
               style={{ ...styles.finalTopBtn, ...styles.finalSendBtn }}
             >
@@ -2546,10 +2568,15 @@ export default function ShoppingList() {
       {exitReminder && (
         <div style={{ ...styles.overlay, alignItems: "center", padding: "0 16px", zIndex: 45 }} onClick={() => setExitReminder(null)}>
           <div style={{ ...styles.sheet, borderRadius: 18, borderBottom: "1px solid #24302622", maxWidth: 340, textAlign: "center" }} onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="exit-rem-title">
-            <h3 id="exit-rem-title" style={{ ...styles.sheetTitle, marginBottom: 10 }}>האם זכרת להוסיף?</h3>
-            <ul style={{ listStyle: "none", padding: 0, margin: "0 0 16px", fontFamily: "'Heebo', sans-serif", fontSize: "1.05rem", fontWeight: 600, color: "#243026", lineHeight: 1.9 }}>
-              {EXIT_REMINDER_ITEMS.map((n) => <li key={n}>{n}</li>)}
+            <h3 id="exit-rem-title" style={{ ...styles.sheetTitle, marginBottom: 10 }}>
+              {exitReminder.missing.length === 1 ? "שים לב, המוצר הזה לא הוזמן:" : "שים לב, המוצרים האלה לא הוזמנו:"}
+            </h3>
+            <ul style={{ listStyle: "none", padding: 0, margin: "0 0 10px", fontFamily: "'Heebo', sans-serif", fontSize: "1.05rem", fontWeight: 600, color: "#243026", lineHeight: 1.9 }}>
+              {exitReminder.missing.map((n) => <li key={n}>{n}</li>)}
             </ul>
+            <p style={{ margin: "0 0 16px", fontFamily: "'Heebo', sans-serif", fontSize: "0.95rem", color: "#243026cc" }}>
+              {exitReminder.missing.length === 1 ? "לאשר שהוא לא נחוץ ולהמשיך?" : "לאשר שהם לא נחוצים ולהמשיך?"}
+            </p>
             <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
               {exitReminder.href ? (
                 <a
@@ -2560,7 +2587,7 @@ export default function ShoppingList() {
                   className="chalk-btn"
                   style={{ ...styles.finalTopBtn, ...styles.finalSendBtn, textDecoration: "none" }}
                 >
-                  המשך
+                  אישור, המשך
                 </a>
               ) : (
                 <button
@@ -2569,7 +2596,7 @@ export default function ShoppingList() {
                   style={{ ...styles.finalTopBtn, ...styles.finalSendBtn }}
                   autoFocus
                 >
-                  המשך
+                  אישור, המשך
                 </button>
               )}
               <button
