@@ -4,7 +4,7 @@ import { isSendPassword, currentFamily } from "./families.js";
 import { trace } from "./debug.js";
 import { faceLoginSupported, sendFaceLogin, hasSendFace } from "./passkey.js";
 import { getSyncStatus, flushNow } from "./sync.js";
-import { readHistory, recordHistory } from "./history.js";
+import { readHistory, recordSent } from "./history.js";
 import { isInstalled, isIOS, notifyPermission, badgePromptDone, markBadgePromptDone, enableBadge } from "./badge.js";
 import { speakHe, stopSpeaking, primeSpeech, onSpeechStatus, micTone, MIC_HELP } from "./speech.js";
 import { parseCommand, findProduct, findCategory, applyOp, speakItem, prettyHe, normHe, VOICE_HELP, kgOf, unitsOf, withKg, withUnits } from "./voice.js";
@@ -722,13 +722,15 @@ export default function ShoppingList() {
     }
   };
 
-  // Every change to the list is kept as a version in the history.
+  // The history keeps only lists that were sent. Opening the app once also removes
+  // the unsent versions older app versions kept there.
   useEffect(() => {
     if (!loaded) return;
-    const r = lastRemoteByRef.current;
-    const by = r.name && Date.now() - r.at < 6000 ? r.name : userName;
-    try { recordHistory(items, by); } catch {}
-  }, [items, loaded]);
+    try { readHistory(); } catch {}
+  }, [loaded]);
+  const markSent = (via) => {
+    try { recordSent(items.map((it) => ({ ...it })), userName, via); } catch {}
+  };
 
   // Saves everything (to the phone and to the family's server) and closes the app back to the
   // login screen, so the next person needs Face ID or the password.
@@ -912,7 +914,7 @@ export default function ShoppingList() {
   const remindThen = ({ run, href }) => {
     const missing = missingReminders(items.filter((it) => !it.done));
     if (missing.length > 0) { setExitReminder({ run, href, missing }); return; }
-    if (href) window.open(href, "_blank", "noopener,noreferrer");
+    if (href) { markSent("whatsapp"); window.open(href, "_blank", "noopener,noreferrer"); }
     else if (run) run();
   };
 
@@ -1247,7 +1249,7 @@ export default function ShoppingList() {
       document.removeEventListener("visibilitychange", onLeave);
       // The mail app opened: the list is sent, so archive it and clear the choices.
       // If it didn't open, the list stays so it can still be copied.
-      if (left) archiveAfterSendRef.current();
+      if (left) { markSent("mail"); archiveAfterSendRef.current(); }
       else setMailFailed(true);
     }, 1500);
   };
@@ -2023,7 +2025,7 @@ export default function ShoppingList() {
       <div style={styles.board}>
        {showHistory ? (
         <>
-          <h2 style={styles.finalTitle}>היסטוריית הרשימה</h2>
+          <h2 style={styles.finalTitle}>רשימות שנשלחו</h2>
 
           <div style={styles.finalTopBar}>
             <button onClick={() => setShowHistory(false)} className="chalk-btn final-top-btn" style={styles.finalTopBtn}>
@@ -2033,12 +2035,12 @@ export default function ShoppingList() {
           </div>
 
           <p style={{ ...styles.pickHint, padding: "0 8px 10px" }}>
-            כל שינוי ברשימה נשמר כאן אוטומטית. בוחרים גרסה ולוחצים ״שחזר״ כדי להחזיר אותה.
+            כל רשימה שנשלחת מהטלפון הזה (בווצאפ או במייל) נשמרת כאן 40 יום. בוחרים רשימה ולוחצים ״שחזר״ כדי להחזיר אותה.
           </p>
 
           <div style={styles.pickScroll}>
             {historyList.length === 0 && (
-              <p style={{ ...styles.pickHint, padding: "14px 8px" }}>עדיין אין גרסאות שמורות.</p>
+              <p style={{ ...styles.pickHint, padding: "14px 8px" }}>עדיין לא נשלחו רשימות מהטלפון הזה.</p>
             )}
             {historyList.map((h, idx) => {
               const open = openHistoryAt === h.at;
@@ -2049,8 +2051,9 @@ export default function ShoppingList() {
                   <button onClick={() => { setOpenHistoryAt(open ? null : h.at); setConfirmRestoreAt(null); }} style={styles.savedHeader}>
                     <span style={styles.savedDate}>
                       {formatHistoryAt(h.at)}
-                      {idx === 0 && <span style={{ fontSize: "0.75em", opacity: 0.7 }}> · הרשימה הנוכחית</span>}
-                      {h.by && <span style={{ display: "block", fontSize: "0.75em", opacity: 0.7 }}>{h.by}</span>}
+                      <span style={{ display: "block", fontSize: "0.75em", opacity: 0.7 }}>
+                        {h.via === "mail" ? "נשלח במייל" : "נשלח בווצאפ"}{h.by ? ` · ${h.by}` : ""}
+                      </span>
                     </span>
                     <span style={styles.savedCount}>{toBuy.length} מוצרים{done ? ` · ${done} נאספו` : ""}</span>
                   </button>
@@ -2062,7 +2065,7 @@ export default function ShoppingList() {
                           {formatListLine({ qty: unitsOf(it), kg: kgOf(it), name: it.name })}
                         </div>
                       ))}
-                      {idx > 0 && (
+                      {(
                         <div style={styles.savedActions}>
                           {confirmRestoreAt === h.at ? (
                             <>
@@ -2459,7 +2462,7 @@ export default function ShoppingList() {
               href={whatsappHref}
               target="_blank"
               rel="noopener noreferrer"
-              onClick={(e) => { if (finalItems.length === 0) { e.preventDefault(); listEmptyMsg(); } else if (missingReminders(finalItems).length > 0) { e.preventDefault(); remindThen({ href: whatsappHref }); } }}
+              onClick={(e) => { if (finalItems.length === 0) { e.preventDefault(); listEmptyMsg(); } else if (missingReminders(finalItems).length > 0) { e.preventDefault(); remindThen({ href: whatsappHref }); } else markSent("whatsapp"); }}
               className="chalk-btn final-top-btn"
               style={styles.finalTopBtn}
             >
@@ -2583,7 +2586,7 @@ export default function ShoppingList() {
                   href={exitReminder.href}
                   target="_blank"
                   rel="noopener noreferrer"
-                  onClick={() => setExitReminder(null)}
+                  onClick={() => { markSent("whatsapp"); setExitReminder(null); }}
                   className="chalk-btn"
                   style={{ ...styles.finalTopBtn, ...styles.finalSendBtn, textDecoration: "none" }}
                 >
@@ -2846,7 +2849,7 @@ export default function ShoppingList() {
           href={whatsappHref}
           target="_blank"
           rel="noopener noreferrer"
-          onClick={() => setSendPrompt(null)}
+          onClick={() => { markSent("whatsapp"); setSendPrompt(null); }}
           style={styles.tapAnywhere}
           aria-label="הקישו כדי לפתוח את הוואטסאפ עם הרשימה"
           autoFocus
