@@ -38,7 +38,7 @@ jobs:
         run: |
           git config user.name "price-bot"
           git config user.email "price-bot@users.noreply.github.com"
-          git add prices.json prices/last-run.json prices/karkur-items.json 2>/dev/null || git add prices/last-run.json
+          git add prices.json prices/last-run.json prices/all.json; git add prices/karkur-items.json 2>/dev/null || true
           if git diff --cached --quiet; then echo "no changes"; exit 0; fi
           git commit -m "Prices: update from Pulitzer Karkur"
           git pull --rebase -q origin main && git push -q origin HEAD:main

@@ -195,6 +195,19 @@ def main():
         status["mapped"] = len(prices)
         status["missing"] = missing
 
+        # Every item in the branch, so the app can price a product the family added
+        # by hand (matched by name in the app): [name, price, 1 if sold by weight].
+        seen, allrows = set(), []
+        for i in sorted(items, key=lambda i: (i["name"], i["code"])):
+            nm = re.sub(r"\s+", " ", i["name"]).strip()
+            if i["price"] <= 0 or not nm or nm in seen:
+                continue
+            seen.add(nm)
+            allrows.append([nm, i["price"], 1 if i["weighted"] else 0])
+        with open(os.path.join(HERE, "all.json"), "w", encoding="utf-8") as f:
+            json.dump({"updated": started.strftime("%Y-%m-%d %H:%M"), "items": allrows}, f, ensure_ascii=False, separators=(",", ":"))
+        status["all_items"] = len(allrows)
+
         out = {
             "updated": started.strftime("%Y-%m-%d %H:%M"),
             "store": store.get("name", ""),
