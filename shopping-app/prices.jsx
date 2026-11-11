@@ -292,7 +292,7 @@ export function PriceCellSpace({ stack = false }) {
   return <span className="pr-space" style={{ flex: `0 0 ${stack ? 54 : 114}px` }} aria-hidden="true" />;
 }
 
-// Total of the whole list, fixed at the bottom of every screen. items: [{ name, units, kg }]
+// Total of the whole list, fixed at the bottom of every screen, in bright yellow to stand out. items: [{ name, units, kg }]
 // of what is still to buy. Rows priced by a typical weight make it an estimate; rows
 // with no price are counted and named as missing.
 export function GrandTotal({ items }) {
@@ -309,11 +309,11 @@ export function GrandTotal({ items }) {
   return (
     <div
       role="status" aria-live="polite"
-      style={{ position: "fixed", left: "50%", transform: "translateX(-50%)", bottom: "calc(26px + env(safe-area-inset-bottom, 0px))", zIndex: 25, background: "#243026", color: "#FFFFFF", borderRadius: 999, padding: "8px 16px", boxShadow: "0 4px 14px #00000033", fontFamily: "'Heebo', sans-serif", display: "flex", flexDirection: "column", alignItems: "center", lineHeight: 1.15, pointerEvents: "none", whiteSpace: "nowrap" }}
+      style={{ position: "fixed", left: "50%", transform: "translateX(-50%)", bottom: "calc(26px + env(safe-area-inset-bottom, 0px))", zIndex: 25, background: "#FFC83D", color: "#243026", border: "2px solid #FFFFFF", borderRadius: 999, padding: "8px 18px", boxShadow: "0 4px 16px #00000040", fontFamily: "'Heebo', sans-serif", display: "flex", flexDirection: "column", alignItems: "center", lineHeight: 1.15, pointerEvents: "none", whiteSpace: "nowrap" }}
     >
-      <span style={{ fontSize: "0.95rem", fontWeight: 700 }}>סה״כ מחיר {est ? "≈" : ""}₪{fmt(sum)}</span>
+      <span style={{ fontSize: "1.05rem", fontWeight: 800 }}>סה״כ מחיר {est ? "≈" : ""}₪{fmt(sum)}</span>
       {(est || missing > 0) && (
-        <span style={{ fontSize: "0.62rem", opacity: 0.8 }}>
+        <span style={{ fontSize: "0.64rem", fontWeight: 600, opacity: 0.85 }}>
           {est ? "משוער" : ""}{est && missing ? " · " : ""}{missing ? `${missing} בלי מחיר` : ""}
         </span>
       )}
