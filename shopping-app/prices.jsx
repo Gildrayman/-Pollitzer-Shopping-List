@@ -4,7 +4,8 @@
 // into prices.json (read from GitHub so a new night's prices need no app release).
 // A price the family types in (tap the price) is kept in PRICES_KEY, shared with
 // the family, and wins over the store price; clearing it brings the store price back.
-// Unit: "k" = per kilo, "u" = per unit. Prices are not added to the emailed list.
+// Unit: "k" = per kilo, "u" = per unit. A third number, when there, is the typical
+// kilos of one unit (medium piece or usual pack), for TotalTag's estimate. Prices are not added to the emailed list.
 import React, { useState, useEffect } from "react";
 
 export const PRICES_KEY = "family-shopping-list-price-overrides";
@@ -137,8 +138,58 @@ export function PriceTag({ name }) {
       aria-label={`מחיר משוער ${fmt(p[0])} שקלים ${p[1] === "k" ? "לקילו" : "ליחידה"}, לחיצה לעריכה`}
       style={{ ...box, background: "#3E7C5912", outline: own ? "1px dashed #3E7C59" : "none" }}
     >
-      <span style={{ fontSize: "0.76rem", fontWeight: 700 }}>≈₪{fmt(p[0])}</span>
-      <span style={{ fontSize: "0.56rem", color: "#7C8574" }}>משוער {p[1] === "k" ? "לק״ג" : "ליח׳"}</span>
+      <span style={{ fontSize: "0.76rem", fontWeight: 700 }}>₪{fmt(p[0])}</span>
+      <span style={{ fontSize: "0.56rem", color: "#7C8574" }}>{p[1] === "k" ? "לק״ג" : "ליח׳"}</span>
     </button>
+  );
+}
+
+// Total for one row, not editable: units x unit price, or kilos x kilo price. A per-kilo
+// product chosen by units is estimated with its typical weight per unit ("סה״כ משוער").
+export function rowTotal(name, units, kg) {
+  const key = String(name || "").trim();
+  const own = overrides[key];
+  const st = store.prices[key];
+  const p = own || st;
+  if (!p) return null;
+  const unitKg = (p.length > 2 && p[2]) || (st && st[2]) || 0;
+  const [price, unit] = p;
+  if (kg > 0) {
+    if (unit === "k") return { sum: kg * price, est: false };
+    if (unitKg) return { sum: (kg / unitKg) * price, est: true };
+    return null;
+  }
+  if (units > 0) {
+    if (unit === "u") return { sum: units * price, est: false };
+    if (unitKg) return { sum: units * unitKg * price, est: true };
+    return null;
+  }
+  return { sum: 0, est: false };
+}
+
+export function TotalTag({ name, units = 0, kg = 0 }) {
+  useStore();
+  const [, setOv] = useState(overrides);
+  useEffect(() => { ensureLoaded(); subs.add(setOv); return () => subs.delete(setOv); }, []);
+  const t = rowTotal(name, units, kg);
+  const box = { flex: "0 0 50px", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", lineHeight: 1.1, fontFamily: "'Heebo', sans-serif", color: "#243026" };
+  if (!t || !(t.sum > 0)) return <span style={{ ...box, color: "#B5BBAF", fontSize: "0.72rem" }} aria-hidden="true">—</span>;
+  return (
+    <span style={box} aria-label={`${t.est ? "סך הכל משוער" : "סך הכל"} ${fmt(t.sum)} שקלים`}>
+      <span style={{ fontSize: "0.78rem", fontWeight: 700 }}>₪{fmt(t.sum)}</span>
+      <span style={{ fontSize: "0.56rem", color: "#7C8574" }}>{t.est ? "סה״כ משוער" : "סה״כ"}</span>
+    </span>
+  );
+}
+
+// Total and price side by side (total on the right). In meat and fish, which also has
+// a kilo stepper, they stack in one column so the row still fits a phone.
+export function PriceCell({ name, units = 0, kg = 0, stack = false }) {
+  if (!stack) return <><TotalTag name={name} units={units} kg={kg} /><PriceTag name={name} /></>;
+  return (
+    <span style={{ flex: "0 0 54px", display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
+      <span style={{ display: "flex" }}><TotalTag name={name} units={units} kg={kg} /></span>
+      <span style={{ display: "flex" }}><PriceTag name={name} /></span>
+    </span>
   );
 }

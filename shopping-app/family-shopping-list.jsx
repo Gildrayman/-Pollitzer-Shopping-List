@@ -7,7 +7,7 @@ import { getSyncStatus, flushNow } from "./sync.js";
 import { readHistory, recordSent } from "./history.js";
 import { isInstalled, isIOS, notifyPermission, badgePromptDone, markBadgePromptDone, enableBadge } from "./badge.js";
 import { speakHe, stopSpeaking, primeSpeech, onSpeechStatus, micTone, MIC_HELP } from "./speech.js";
-import { PriceTag, PricesUpdated } from "./prices.jsx";
+import { PriceCell, PricesUpdated } from "./prices.jsx";
 import { parseCommand, findProduct, findCategory, applyOp, speakItem, prettyHe, normHe, VOICE_HELP, kgOf, unitsOf, withKg, withUnits } from "./voice.js";
 
 const CATEGORIES = [
@@ -2406,7 +2406,7 @@ export default function ShoppingList() {
                   >
                     <X size={14} />
                   </button>
-                  <PriceTag name={item.name} />
+                  <PriceCell name={item.name} units={qty} kg={activeTab === KG_CATEGORY ? getListKg(item.name) : 0} stack={activeTab === KG_CATEGORY} />
                   {activeTab === KG_CATEGORY && (
                     <KgStepper kg={getListKg(item.name)} onSet={(n) => setListKg(item.name, activeTab, n)} />
                   )}
@@ -2548,7 +2548,7 @@ export default function ShoppingList() {
                     <EditableName name={it.name} onSave={(t) => renameProduct(it.name, t)} />
                     <EditableNote note={note} onSave={(t) => setProductNote(it.name, t)} />
                   </span>
-                  <PriceTag name={it.name} />
+                  <PriceCell name={it.name} units={qty} kg={kgOf(it)} stack={it.category === KG_CATEGORY} />
                   {/* In the summary show only what was chosen: kilos or units, not both. */}
                   {it.category === KG_CATEGORY && kgOf(it) > 0 ? (
                     <KgStepper kg={kgOf(it)} onSet={(n) => setListKg(it.name, it.category, n)} />
