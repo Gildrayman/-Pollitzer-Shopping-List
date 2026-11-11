@@ -259,14 +259,21 @@ export function TotalTag({ name, units = 0, kg = 0 }) {
   );
 }
 
-// Total and price side by side (total on the right). In meat and fish, which also has
-// a kilo stepper, they stack in one column so the row still fits a phone.
+// Price, then the total to its left (the row reads right to left: name, amount, price,
+// total). In meat and fish, which also has a kilo stepper, they stack in one column
+// (price above total) so the row still fits a phone.
 export function PriceCell({ name, units = 0, kg = 0, stack = false }) {
-  if (!stack) return <><TotalTag name={name} units={units} kg={kg} /><PriceTag name={name} /></>;
+  if (!stack) return <><PriceTag name={name} /><TotalTag name={name} units={units} kg={kg} /></>;
   return (
     <span style={{ flex: "0 0 54px", display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
-      <span style={{ display: "flex" }}><TotalTag name={name} units={units} kg={kg} /></span>
       <span style={{ display: "flex" }}><PriceTag name={name} /></span>
+      <span style={{ display: "flex" }}><TotalTag name={name} units={units} kg={kg} /></span>
     </span>
   );
+}
+
+// Empty space the width of PriceCell, for rows that have none (the add-by-hand row),
+// so the amount columns line up.
+export function PriceCellSpace({ stack = false }) {
+  return <span style={{ flex: `0 0 ${stack ? 54 : 114}px` }} aria-hidden="true" />;
 }

@@ -7,7 +7,7 @@ import { getSyncStatus, flushNow } from "./sync.js";
 import { readHistory, recordSent } from "./history.js";
 import { isInstalled, isIOS, notifyPermission, badgePromptDone, markBadgePromptDone, enableBadge } from "./badge.js";
 import { speakHe, stopSpeaking, primeSpeech, onSpeechStatus, micTone, MIC_HELP } from "./speech.js";
-import { PriceCell, PricesUpdated } from "./prices.jsx";
+import { PriceCell, PriceCellSpace, PricesUpdated } from "./prices.jsx";
 import { parseCommand, findProduct, findCategory, applyOp, speakItem, prettyHe, normHe, VOICE_HELP, kgOf, unitsOf, withKg, withUnits } from "./voice.js";
 
 const CATEGORIES = [
@@ -2361,13 +2361,6 @@ export default function ShoppingList() {
                 placeholder="הוסף ידנית..."
                 style={styles.customPickInput}
               />
-              {activeTab === KG_CATEGORY && (
-                <KgStepper
-                  kg={customPick.trim() ? getListKg(customPick.trim()) : 0}
-                  disabled={!customPick.trim()}
-                  onSet={(n) => customPick.trim() && setListKg(customPick.trim(), activeTab, n)}
-                />
-              )}
               <WithUnitsLabel show={activeTab === KG_CATEGORY}>
                 <QtyStepper
                   qty={customQty}
@@ -2377,6 +2370,14 @@ export default function ShoppingList() {
                   onSet={(n) => customPick.trim() && setListQty(customPick.trim(), activeTab, n)}
                 />
               </WithUnitsLabel>
+              {activeTab === KG_CATEGORY && (
+                <KgStepper
+                  kg={customPick.trim() ? getListKg(customPick.trim()) : 0}
+                  disabled={!customPick.trim()}
+                  onSet={(n) => customPick.trim() && setListKg(customPick.trim(), activeTab, n)}
+                />
+              )}
+              <PriceCellSpace stack={activeTab === KG_CATEGORY} />
             </div>
 
             {catalogFor(activeTab).length === 0 && (
@@ -2406,10 +2407,6 @@ export default function ShoppingList() {
                   >
                     <X size={14} />
                   </button>
-                  <PriceCell name={item.name} units={qty} kg={activeTab === KG_CATEGORY ? getListKg(item.name) : 0} stack={activeTab === KG_CATEGORY} />
-                  {activeTab === KG_CATEGORY && (
-                    <KgStepper kg={getListKg(item.name)} onSet={(n) => setListKg(item.name, activeTab, n)} />
-                  )}
                   <WithUnitsLabel show={activeTab === KG_CATEGORY}>
                     <QtyStepper
                       qty={qty}
@@ -2418,6 +2415,10 @@ export default function ShoppingList() {
                       onSet={(n) => setListQty(item.name, activeTab, n)}
                     />
                   </WithUnitsLabel>
+                  {activeTab === KG_CATEGORY && (
+                    <KgStepper kg={getListKg(item.name)} onSet={(n) => setListKg(item.name, activeTab, n)} />
+                  )}
+                  <PriceCell name={item.name} units={qty} kg={activeTab === KG_CATEGORY ? getListKg(item.name) : 0} stack={activeTab === KG_CATEGORY} />
                 </div>
               );
             })}
@@ -2526,6 +2527,7 @@ export default function ShoppingList() {
                 onDec={decrementFinalCustom}
                 onSet={(n) => finalCustomText.trim() && setListQty(finalCustomText.trim(), guessCategory(finalCustomText.trim()), n)}
               />
+              <PriceCellSpace />
             </div>
 
             {finalItems.length === 0 && (
@@ -2548,7 +2550,6 @@ export default function ShoppingList() {
                     <EditableName name={it.name} onSave={(t) => renameProduct(it.name, t)} />
                     <EditableNote note={note} onSave={(t) => setProductNote(it.name, t)} />
                   </span>
-                  <PriceCell name={it.name} units={qty} kg={kgOf(it)} stack={it.category === KG_CATEGORY} />
                   {/* In the summary show only what was chosen: kilos or units, not both. */}
                   {it.category === KG_CATEGORY && kgOf(it) > 0 ? (
                     <KgStepper kg={kgOf(it)} onSet={(n) => setListKg(it.name, it.category, n)} />
@@ -2562,6 +2563,7 @@ export default function ShoppingList() {
                       />
                     </WithUnitsLabel>
                   )}
+                  <PriceCell name={it.name} units={qty} kg={kgOf(it)} />
                 </div>
               );
             })}
