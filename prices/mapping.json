@@ -1,0 +1,1 @@
+{"_note": "app product name -> store item code (ItemCode). unit: k=per kilo, u=per unit (default from the store file). factor: multiply the price (e.g. 2 for a 2-pack)."}

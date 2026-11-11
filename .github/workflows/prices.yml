@@ -1,0 +1,47 @@
+# Nightly update of product prices from Pulitzer's official price files (Karkur branch).
+# Runs at midnight Israel time (two UTC slots; the gate step keeps 00:00-01:59 Israel time,
+# so it works in summer and winter time), and on
+# any change to prices/ so a new mapping is applied right away.
+name: Update prices
+on:
+  schedule:
+    - cron: "0 21 * * *"
+    - cron: "0 22 * * *"
+  push:
+    branches: [main]
+    paths: ["prices/mapping.json", "prices/update_prices.py", ".github/workflows/prices.yml", "prices/dump-request"]
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: prices
+  cancel-in-progress: false
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Midnight in Israel?
+        id: gate
+        run: |
+          # Scheduled runs are often late, so 00:00-01:59 Israel time counts.
+          H=$(TZ=Asia/Jerusalem date +%H)
+          if [ "${{ github.event_name }}" != "schedule" ] || [ "$H" = "00" ] || [ "$H" = "01" ]; then echo "run=1" >> "$GITHUB_OUTPUT"; else echo "run=0" >> "$GITHUB_OUTPUT"; fi
+      - name: Update prices
+        if: steps.gate.outputs.run == '1'
+        run: |
+          DUMP=""
+          if [ "${{ github.event_name }}" != "schedule" ]; then DUMP="--dump"; fi
+          python3 prices/update_prices.py $DUMP || echo "FAILED=1" >> "$GITHUB_ENV"
+      - name: Commit
+        if: steps.gate.outputs.run == '1'
+        run: |
+          git config user.name "price-bot"
+          git config user.email "price-bot@users.noreply.github.com"
+          git add prices.json prices/last-run.json prices/karkur-items.json 2>/dev/null || git add prices/last-run.json
+          if git diff --cached --quiet; then echo "no changes"; exit 0; fi
+          git commit -m "Prices: update from Pulitzer Karkur"
+          git pull --rebase -q origin main && git push -q origin HEAD:main
+      - name: Report failure
+        if: env.FAILED == '1'
+        run: exit 1
