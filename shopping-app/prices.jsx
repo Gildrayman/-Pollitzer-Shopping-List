@@ -44,6 +44,82 @@ export function PricesUpdated({ style }) {
   return <div style={style} aria-hidden="true">מעודכן ל-{`${m[3]}.${m[2]}.${m[1]}`}</div>;
 }
 
+const FINALS = { "ך": "כ", "ם": "מ", "ן": "נ", "ף": "פ", "ץ": "צ" };
+const STOP = new Set(["של", "עם", "ב", "ו", "ל", "גר", "גרם", "קג", "מל", "ליטר", "יח", "ישראלי", "ישראל", "טרי", "טריים", "טרייה", "טריה"]);
+function rawToks(s) {
+  return String(s || "").replace(/[״"'׳`’]/g, "").replace(/[()\/\-.,+%*:]/g, " ").toLowerCase().split(/\s+/).filter(Boolean);
+}
+function toks(s) {
+  return String(s || "").replace(/[״"'׳`’]/g, "").replace(/[()\/\-.,+%*:]/g, " ").toLowerCase()
+    .split(/\s+/).filter(Boolean)
+    .map((t) => t.replace(/[ךםןףץ]/g, (c) => FINALS[c]))
+    .map((t) => (t.length > 3 ? t.replace(/(יות|ימ|ות|יה|ה)$/, "") : t))
+    .filter((t) => t && !STOP.has(t) && !/^\d+$/.test(t));
+}
+// 1 = same word, 0.4 = one starts with the other (plural/ending), 0 = different.
+function same(a, b) {
+  if (a === b) return 1;
+  return a.length >= 3 && b.length >= 3 && (a.startsWith(b) || b.startsWith(a)) ? 0.4 : 0;
+}
+// Best store item for a product name the family typed: every word must appear in the
+// item's name; among those, the item whose name has the fewest other words wins,
+// with a bonus when it starts with the same word.
+function bestMatch(name, index) {
+  const q = toks(name);
+  if (!q.length) return null;
+  const q0 = rawToks(name)[0];
+  let best = null, bestScore = -1;
+  for (const it of index) {
+    const t = it.t;
+    let sum = 0, ok = true;
+    for (const w of q) {
+      let b = 0;
+      for (const x of t) b = Math.max(b, same(w, x));
+      if (!b) { ok = false; break; }
+      sum += b;
+    }
+    if (!ok) continue;
+    // Ties: the item whose first word is exactly the first word typed, then the shorter name.
+    const score = sum / t.length + 0.5 * same(q[0], t[0]) + (it.r0 === q0 ? 0.1 : 0) - it.n.length / 1000;
+    if (score > bestScore) { bestScore = score; best = it; }
+  }
+  return best;
+}
+
+
+// Products the family added by hand are not in mapping.json: they are matched by name
+// against every item of the branch (prices/all.json), and the best match's price is used.
+// A per-kilo match without a known weight per unit is estimated at DEFAULT_UNIT_KG.
+const ALL_URL = "https://raw.githubusercontent.com/Gildrayman/-Pollitzer-Shopping-List/main/prices/all.json";
+const DEFAULT_UNIT_KG = 0.2;
+let allIndex = null;
+let allLoading = false;
+const guessCache = new Map();
+async function loadAll() {
+  if (allLoading) return;
+  allLoading = true;
+  try {
+    const r = await fetch(`${ALL_URL}?t=${Math.floor(Date.now() / 3600000)}`, { cache: "no-store" });
+    if (r.ok) {
+      const j = await r.json();
+      allIndex = (j.items || []).map(([n, p, w]) => ({ n, p, w, t: toks(n), r0: rawToks(n)[0] }));
+      guessCache.clear();
+      storeSubs.forEach((f) => f({ ...store }));
+    }
+  } catch { /* offline */ }
+  allLoading = false;
+}
+// [price, unit, kilos per unit, store item name] for a hand-added product, or null.
+function guessPrice(key) {
+  if (!key) return null;
+  if (!allIndex) { loadAll(); return null; }
+  if (guessCache.has(key)) return guessCache.get(key);
+  const m = bestMatch(key, allIndex);
+  const g = m ? (m.w ? [m.p, "k", DEFAULT_UNIT_KG, m.n] : [m.p, "u", 0, m.n]) : null;
+  guessCache.set(key, g);
+  return g;
+}
+
 let overrides = {};
 let loaded = false;
 const subs = new Set();
@@ -74,7 +150,7 @@ async function savePrice(name, entry) {
 
 export function priceOf(name) {
   const k = String(name || "").trim();
-  return overrides[k] || store.prices[k] || null;
+  return overrides[k] || store.prices[k] || guessPrice(k);
 }
 
 const fmt = (n) => (Math.round(n * 100) / 100).toFixed(2);
@@ -87,7 +163,8 @@ export function PriceTag({ name }) {
   const st = useStore();
   useEffect(() => { ensureLoaded(); subs.add(setOv); return () => subs.delete(setOv); }, []);
   const own = ov[key];
-  const p = own || st.prices[key] || null;
+  const auto = st.prices[key] || guessPrice(key);
+  const p = own || auto || null;
 
   const start = () => { setDraft(p ? String(p[0]) : ""); setUnit(p ? p[1] : "u"); };
   const commit = () => {
@@ -96,7 +173,7 @@ export function PriceTag({ name }) {
     setDraft(null);
     if (!draft.trim()) { if (own) savePrice(key, null); return; }
     if (!Number.isFinite(v) || v <= 0) return;
-    const r = st.prices[key];
+    const r = auto;
     if (r && r[0] === v && r[1] === unit) { if (own) savePrice(key, null); return; }
     savePrice(key, [v, unit]);
   };
@@ -134,7 +211,7 @@ export function PriceTag({ name }) {
   return (
     <button
       type="button" onClick={start}
-      title={own ? "מחיר משוער שהוקלד ידנית (לחיצה לעריכה)" : "מחיר משוער לפי מחירון פוליצר כרכור (לחיצה לעריכה)"}
+      title={own ? "מחיר משוער שהוקלד ידנית (לחיצה לעריכה)" : p[3] ? `מחיר של "${p[3]}" בפוליצר כרכור, נמצא לפי השם (לחיצה לעריכה)` : "מחיר לפי מחירון פוליצר כרכור (לחיצה לעריכה)"}
       aria-label={`מחיר משוער ${fmt(p[0])} שקלים ${p[1] === "k" ? "לקילו" : "ליחידה"}, לחיצה לעריכה`}
       style={{ ...box, background: "#3E7C5912", outline: own ? "1px dashed #3E7C59" : "none" }}
     >
@@ -149,7 +226,7 @@ export function PriceTag({ name }) {
 export function rowTotal(name, units, kg) {
   const key = String(name || "").trim();
   const own = overrides[key];
-  const st = store.prices[key];
+  const st = store.prices[key] || guessPrice(key);
   const p = own || st;
   if (!p) return null;
   const unitKg = (p.length > 2 && p[2]) || (st && st[2]) || 0;
