@@ -3,7 +3,7 @@
 Pulitzer (chain 7291059100008) publishes its prices on the Cerberus FTP server
 (url.retail.publishedprices.co.il, user "politzer", no password), as the Food Act
 requires. This script finds the Karkur branch, downloads its latest full price
-file, and writes ../prices.json for the app: { product name in the app: [price, unit] }.
+file, and writes ../prices.json for the app: { product name in the app: [price, unit, typical kilos per unit (optional)] }.
 Which store item each app product is, is set in prices/mapping.json.
 
 Run: python3 prices/update_prices.py [--dump]
@@ -191,7 +191,7 @@ def main():
                 continue
             unit = m.get("unit") or ("k" if it["weighted"] else "u")
             price = round(it["price"] * float(m.get("factor", 1)), 2)
-            prices[app_name] = [price, unit]
+            prices[app_name] = [price, unit] + ([float(m["unitKg"])] if m.get("unitKg") else [])
         status["mapped"] = len(prices)
         status["missing"] = missing
 
