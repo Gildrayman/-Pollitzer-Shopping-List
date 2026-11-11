@@ -324,6 +324,7 @@ const MERGERS = {
   "family-shopping-list-hidden-products": (server, local) => [...new Set([...server, ...local])],
   "family-shopping-list-note-overrides": (server, local) => ({ ...local, ...server }),
   "family-shopping-list-name-overrides": (server, local) => ({ ...local, ...server }),
+  "family-shopping-list-price-overrides": (server, local) => ({ ...local, ...server }),
 };
 
 function mergeOnce(entries, pending) {
