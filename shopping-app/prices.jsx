@@ -28,6 +28,7 @@ function ensureStore() {
   if (storeLoaded) return;
   storeLoaded = true;
   loadStore();
+  loadAll(); // ready in advance, so a product added by hand is priced at once
   document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") loadStore(); });
 }
 function useStore() {
@@ -99,7 +100,7 @@ async function loadAll() {
   if (allLoading) return;
   allLoading = true;
   try {
-    const r = await fetch(`${ALL_URL}?t=${Math.floor(Date.now() / 3600000)}`, { cache: "no-store" });
+    const r = await fetch(`${ALL_URL}?t=${Math.floor(Date.now() / 3600000)}`);
     if (r.ok) {
       const j = await r.json();
       allIndex = (j.items || []).map(([n, p, w]) => ({ n, p, w, t: toks(n), r0: rawToks(n)[0] }));
