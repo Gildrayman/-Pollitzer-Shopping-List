@@ -4,7 +4,7 @@
 // into prices.json (read from GitHub so a new night's prices need no app release).
 // A price the family types in (tap the price) is kept in PRICES_KEY, shared with
 // the family, and wins over the store price; clearing it brings the store price back.
-// Unit: "k" = per kilo, "u" = per unit. A third number, when there, is the typical
+// Unit: "k" = per kilo, "u" = per unit, "g" = per 100 grams (cheese by weight). A third number, when there, is the typical
 // kilos of one unit (medium piece or usual pack), for TotalTag's estimate. Prices are not added to the emailed list.
 import React, { useState, useEffect } from "react";
 
@@ -120,6 +120,7 @@ function guessPrice(key) {
   return g;
 }
 
+
 let overrides = {};
 let loaded = false;
 const subs = new Set();
@@ -148,9 +149,21 @@ async function savePrice(name, entry) {
   try { await window.storage.set(PRICES_KEY, JSON.stringify(next), true); } catch (e) { console.error("שגיאת שמירה", e); }
 }
 
+// Cheeses sold by weight show their price per 100 grams (unit "g"), as at the deli counter.
+const CHEESE = /(גבינ|צפתית|בולגרית|פטה|מוצרלה|גאודה|פרמזן|צ'?דר|ברינזה|חלומי|קשקבל|לבנה|לאבנה|קממבר|ריקוטה|מנצ'?גו|פיקורינו|גרנה|רוקפור|אמנטל)/;
+function shown(name, p) {
+  if (p && p[1] === "k" && CHEESE.test(name)) return [Math.round(p[0] * 10) / 100, "g", ...p.slice(2)];
+  return p || null;
+}
+const UNIT_LABEL = { k: "לק״ג", u: "ליח׳", g: "ל-100 גר׳" };
+const UNIT_SAY = { k: "לקילו", u: "ליחידה", g: "ל-100 גרם" };
+const NEXT_UNIT = { u: "k", k: "g", g: "u" };
+// Price per kilo of an entry that is per kilo or per 100 grams; 0 if it is per unit.
+const perKg = (price, unit) => (unit === "k" ? price : unit === "g" ? price * 10 : 0);
+
 export function priceOf(name) {
   const k = String(name || "").trim();
-  return overrides[k] || store.prices[k] || guessPrice(k);
+  return overrides[k] || shown(k, store.prices[k] || guessPrice(k));
 }
 
 const fmt = (n) => (Math.round(n * 100) / 100).toFixed(2);
@@ -163,7 +176,7 @@ export function PriceTag({ name }) {
   const st = useStore();
   useEffect(() => { ensureLoaded(); subs.add(setOv); return () => subs.delete(setOv); }, []);
   const own = ov[key];
-  const auto = st.prices[key] || guessPrice(key);
+  const auto = shown(key, st.prices[key] || guessPrice(key));
   const p = own || auto || null;
 
   const start = () => { setDraft(p ? String(p[0]) : ""); setUnit(p ? p[1] : "u"); };
@@ -191,10 +204,10 @@ export function PriceTag({ name }) {
           style={{ width: 52, height: 24, textAlign: "center", border: "1px solid #3E7C59", borderRadius: 6, fontSize: 16, padding: 0, boxSizing: "border-box", color: "#243026", background: "#FFFFFF" }}
         />
         <button
-          type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => setUnit(unit === "k" ? "u" : "k")}
+          type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => setUnit(NEXT_UNIT[unit] || "u")}
           style={{ border: "1px solid #24302633", borderRadius: 6, background: "#FFFFFF", color: "#4B5347", fontSize: "0.62rem", padding: "1px 4px", cursor: "pointer" }}
         >
-          {unit === "k" ? "לק״ג ⇄" : "ליח׳ ⇄"}
+          {`${UNIT_LABEL[unit] || "ליח׳"} ⇄`}
         </button>
       </span>
     );
@@ -212,11 +225,11 @@ export function PriceTag({ name }) {
     <button
       type="button" className="pr-price" onClick={start}
       title={own ? "מחיר משוער שהוקלד ידנית (לחיצה לעריכה)" : p[3] ? `מחיר של "${p[3]}" בפוליצר כרכור, נמצא לפי השם (לחיצה לעריכה)` : "מחיר לפי מחירון פוליצר כרכור (לחיצה לעריכה)"}
-      aria-label={`מחיר משוער ${fmt(p[0])} שקלים ${p[1] === "k" ? "לקילו" : "ליחידה"}, לחיצה לעריכה`}
+      aria-label={`מחיר משוער ${fmt(p[0])} שקלים ${UNIT_SAY[p[1]] || "ליחידה"}, לחיצה לעריכה`}
       style={{ ...box, background: "#3E7C5912", outline: own ? "1px dashed #3E7C59" : "none" }}
     >
       <span style={{ fontSize: "0.76rem", fontWeight: 700 }}>₪{fmt(p[0])}</span>
-      <span style={{ fontSize: "0.56rem", color: "#7C8574" }}>{p[1] === "k" ? "לק״ג" : "ליח׳"}</span>
+      <span style={{ fontSize: "0.56rem", color: "#7C8574" }}>{UNIT_LABEL[p[1]] || "ליח׳"}</span>
     </button>
   );
 }
@@ -226,19 +239,20 @@ export function PriceTag({ name }) {
 export function rowTotal(name, units, kg) {
   const key = String(name || "").trim();
   const own = overrides[key];
-  const st = store.prices[key] || guessPrice(key);
+  const st = shown(key, store.prices[key] || guessPrice(key));
   const p = own || st;
   if (!p) return null;
   const unitKg = (p.length > 2 && p[2]) || (st && st[2]) || 0;
   const [price, unit] = p;
+  const kilo = perKg(price, unit); // price per kilo for "k" and "g", 0 for "u"
   if (kg > 0) {
-    if (unit === "k") return { sum: kg * price, est: false };
+    if (unit !== "u") return { sum: kg * kilo, est: false };
     if (unitKg) return { sum: (kg / unitKg) * price, est: true };
     return null;
   }
   if (units > 0) {
     if (unit === "u") return { sum: units * price, est: false };
-    if (unitKg) return { sum: units * unitKg * price, est: true };
+    if (unitKg) return { sum: units * unitKg * kilo, est: true };
     return null;
   }
   return { sum: 0, est: false };
