@@ -1,10 +1,12 @@
 {
- "started": "2026-11-11T16:07:34+02:00",
- "ok": false,
- "files_on_server": 67,
+ "started": "2026-11-11T16:09:10+02:00",
+ "ok": true,
+ "files_on_server": 70,
  "file_names": [
   ".",
   "..",
+  "NULLPrice7291059100008-001-001-20261111-160009.gz",
+  "NULLPrice7291059100008-001-002-20261111-160004.gz",
   "NULLPrice7291059100008-001-005-20261111-160013.gz",
   "NULLPromo7291059100008-001-008-20261111-160016.gz",
   "NULLPromo7291059100008-001-009-20261111-160017.gz",
@@ -53,6 +55,7 @@
   "PriceFull7291059100008-001-009-20261111-001004.gz",
   "PriceFull7291059100008-001-011-20261111-001000.gz",
   "Promo7291059100008-001-001-20261111-140041.gz",
+  "Promo7291059100008-001-001-20261111-160039.gz",
   "Promo7291059100008-001-003-20261111-090135.gz",
   "Promo7291059100008-001-003-20261111-100108.gz",
   "Promo7291059100008-001-003-20261111-110122.gz",
@@ -118,7 +121,9 @@
   "name": "כרכור",
   "city": "0"
  },
- "error": "RuntimeError: No PriceFull file for store 005",
- "trace": "Traceback (most recent call last):\n  File \"/home/runner/work/-Pollitzer-Shopping-List/-Pollitzer-Shopping-List/prices/update_prices.py\", line 155, in main\n    src, items = read_items(ftp, names, store[\"id\"])\n                 ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/runner/work/-Pollitzer-Shopping-List/-Pollitzer-Shopping-List/prices/update_prices.py\", line 118, in read_items\n    raise RuntimeError(\"No PriceFull file for store %s\" % store_id)\nRuntimeError: No PriceFull file for store 005\n",
- "finished": "2026-11-11T16:07:37+02:00"
+ "source_file": "PriceFull7291059100008-001-005-20261111-001010.gz + 6 updates (last Price7291059100008-001-005-20261111-130009.gz)",
+ "items_in_branch": 12262,
+ "mapped": 0,
+ "missing": [],
+ "finished": "2026-11-11T16:09:25+02:00"
 }
