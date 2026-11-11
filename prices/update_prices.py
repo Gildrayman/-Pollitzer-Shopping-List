@@ -109,8 +109,11 @@ def find_store(ftp, names, status):
 
 def read_items(ftp, names, store_id):
     sid = str(int(store_id)) if store_id.isdigit() else store_id
-    pat = re.compile(r"^pricefull%s-0*%s-" % (CHAIN, re.escape(sid)), re.I)
+    pat = re.compile(r"^pricefull\D*\d*-0*%s-" % re.escape(sid), re.I)
     files = sorted([n for n in names if pat.match(n)], key=stamp)
+    if not files:  # no full file: use the latest partial price file
+        pat = re.compile(r"^price\D*\d*-0*%s-" % re.escape(sid), re.I)
+        files = sorted([n for n in names if pat.match(n) and not n.lower().startswith("promo")], key=stamp)
     if not files:
         raise RuntimeError("No PriceFull file for store %s" % store_id)
     root = parse_xml(fetch(ftp, files[-1]))
@@ -146,6 +149,7 @@ def main():
         ftp = connect()
         names = listing(ftp)
         status["files_on_server"] = len(names)
+        status["file_names"] = sorted(names)
         store = find_store(ftp, names, status)
         status["store"] = store
         src, items = read_items(ftp, names, store["id"])
@@ -196,6 +200,7 @@ def main():
     status["finished"] = now_il().isoformat(timespec="seconds")
     if not dump:
         status.pop("stores", None)
+        status.pop("file_names", None)
     with open(os.path.join(HERE, "last-run.json"), "w", encoding="utf-8") as f:
         json.dump(status, f, ensure_ascii=False, indent=1)
     print(json.dumps({k: v for k, v in status.items() if k not in ("stores", "trace")}, ensure_ascii=False))
