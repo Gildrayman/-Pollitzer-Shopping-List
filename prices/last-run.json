@@ -1,5 +1,5 @@
 {
- "started": "2026-11-11T16:22:59+02:00",
+ "started": "2026-11-11T16:25:55+02:00",
  "ok": true,
  "files_on_server": 65,
  "file_names": [
@@ -120,5 +120,6 @@
  "items_in_branch": 12262,
  "mapped": 99,
  "missing": [],
- "finished": "2026-11-11T16:23:15+02:00"
+ "all_items": 11214,
+ "finished": "2026-11-11T16:26:09+02:00"
 }
