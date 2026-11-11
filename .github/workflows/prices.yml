@@ -1,12 +1,12 @@
 # Nightly update of product prices from Pulitzer's official price files (Karkur branch).
-# Runs at midnight Israel time (two UTC slots; the gate step keeps 00:00-01:59 Israel time,
+# Runs at 00:30 Israel time (the store publishes its full price file at ~00:10) (two UTC slots; the gate step keeps 00:00-01:59 Israel time,
 # so it works in summer and winter time), and on
 # any change to prices/ so a new mapping is applied right away.
 name: Update prices
 on:
   schedule:
-    - cron: "0 21 * * *"
-    - cron: "0 22 * * *"
+    - cron: "30 21 * * *"
+    - cron: "30 22 * * *"
   push:
     branches: [main]
     paths: ["prices/mapping.json", "prices/update_prices.py", ".github/workflows/prices.yml", "prices/dump-request"]

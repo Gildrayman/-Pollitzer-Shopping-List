@@ -83,8 +83,9 @@ def text(el, *tags):
 
 
 def stamp(name):
-    m = re.search(r"-(\d{12,14})", name)
-    return m.group(1) if m else ""
+    """Date-time in a file name, e.g. ...-20261111-001010.gz -> 20261111001010."""
+    m = re.search(r"-(\d{8})-?(\d{4,6})\.", name)
+    return (m.group(1) + m.group(2).ljust(6, "0")) if m else ""
 
 
 def find_store(ftp, names, status):
@@ -107,16 +108,7 @@ def find_store(ftp, names, status):
     raise RuntimeError("Karkur branch not found in the Stores file")
 
 
-def read_items(ftp, names, store_id):
-    sid = str(int(store_id)) if store_id.isdigit() else store_id
-    pat = re.compile(r"^pricefull\D*\d*-0*%s-" % re.escape(sid), re.I)
-    files = sorted([n for n in names if pat.match(n)], key=stamp)
-    if not files:  # no full file: use the latest partial price file
-        pat = re.compile(r"^price\D*\d*-0*%s-" % re.escape(sid), re.I)
-        files = sorted([n for n in names if pat.match(n) and not n.lower().startswith("promo")], key=stamp)
-    if not files:
-        raise RuntimeError("No PriceFull file for store %s" % store_id)
-    root = parse_xml(fetch(ftp, files[-1]))
+def parse_items(root):
     items = []
     for it in root.iter():
         if it.tag.lower() != "item":
@@ -138,7 +130,25 @@ def read_items(ftp, names, store_id):
             "uomPrice": text(it, "UnitOfMeasurePrice"),
             "updated": text(it, "PriceUpdateDate"),
         })
-    return files[-1], items
+    return items
+
+
+def read_items(ftp, names, store_id):
+    """Latest full price file of the branch, then the day's partial updates after it."""
+    sid = str(int(store_id)) if store_id.isdigit() else store_id
+    full_pat = re.compile(r"^pricefull\d+-\d+-0*%s-" % re.escape(sid), re.I)
+    part_pat = re.compile(r"^price\d+-\d+-0*%s-" % re.escape(sid), re.I)
+    fulls = sorted([n for n in names if full_pat.match(n)], key=stamp)
+    if not fulls:
+        raise RuntimeError("No PriceFull file for store %s" % store_id)
+    base = fulls[-1]
+    by_code = {i["code"]: i for i in parse_items(parse_xml(fetch(ftp, base)))}
+    parts = sorted([n for n in names if part_pat.match(n) and stamp(n) > stamp(base)], key=stamp)
+    for p in parts:
+        for i in parse_items(parse_xml(fetch(ftp, p))):
+            by_code[i["code"]] = i
+    src = base + (" + %d updates (last %s)" % (len(parts), parts[-1]) if parts else "")
+    return src, list(by_code.values())
 
 
 def main():
