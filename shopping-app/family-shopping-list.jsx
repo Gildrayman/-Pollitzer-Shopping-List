@@ -7,7 +7,7 @@ import { getSyncStatus, flushNow } from "./sync.js";
 import { readHistory, recordSent } from "./history.js";
 import { isInstalled, isIOS, notifyPermission, badgePromptDone, markBadgePromptDone, enableBadge } from "./badge.js";
 import { speakHe, stopSpeaking, primeSpeech, onSpeechStatus, micTone, MIC_HELP } from "./speech.js";
-import { PriceCell, PriceCellSpace, PricesUpdated } from "./prices.jsx";
+import { PriceCell, PriceCellSpace, PricesUpdated, GrandTotal } from "./prices.jsx";
 import { parseCommand, findProduct, findCategory, applyOp, speakItem, prettyHe, normHe, VOICE_HELP, kgOf, unitsOf, withKg, withUnits } from "./voice.js";
 
 const CATEGORIES = [
@@ -2911,6 +2911,7 @@ export default function ShoppingList() {
         </div>
       )}
 
+      <GrandTotal items={finalItems.map((it) => ({ name: it.name, units: unitsOf(it), kg: kgOf(it) }))} />
       <PricesUpdated style={{ ...styles.buildTag, bottom: "calc(22px + env(safe-area-inset-bottom, 0px))" }} />
       <div style={styles.buildTag} aria-hidden="true">גרסה {APP_BUILD}</div>
 

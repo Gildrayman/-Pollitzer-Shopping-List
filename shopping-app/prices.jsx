@@ -291,3 +291,32 @@ export function PriceCell({ name, units = 0, kg = 0, stack = false }) {
 export function PriceCellSpace({ stack = false }) {
   return <span className="pr-space" style={{ flex: `0 0 ${stack ? 54 : 114}px` }} aria-hidden="true" />;
 }
+
+// Total of the whole list, fixed at the bottom of every screen. items: [{ name, units, kg }]
+// of what is still to buy. Rows priced by a typical weight make it an estimate; rows
+// with no price are counted and named as missing.
+export function GrandTotal({ items }) {
+  useStore();
+  const [, setOv] = useState(overrides);
+  useEffect(() => { ensureLoaded(); subs.add(setOv); return () => subs.delete(setOv); }, []);
+  let sum = 0, est = false, missing = 0;
+  for (const it of items || []) {
+    const t = rowTotal(it.name, it.units, it.kg);
+    if (!t || !(t.sum > 0)) { if (it.units > 0 || it.kg > 0) missing += 1; continue; }
+    sum += t.sum;
+    if (t.est) est = true;
+  }
+  return (
+    <div
+      role="status" aria-live="polite"
+      style={{ position: "fixed", left: "50%", transform: "translateX(-50%)", bottom: "calc(26px + env(safe-area-inset-bottom, 0px))", zIndex: 25, background: "#243026", color: "#FFFFFF", borderRadius: 999, padding: "8px 16px", boxShadow: "0 4px 14px #00000033", fontFamily: "'Heebo', sans-serif", display: "flex", flexDirection: "column", alignItems: "center", lineHeight: 1.15, pointerEvents: "none", whiteSpace: "nowrap" }}
+    >
+      <span style={{ fontSize: "0.95rem", fontWeight: 700 }}>סה״כ מחיר {est ? "≈" : ""}₪{fmt(sum)}</span>
+      {(est || missing > 0) && (
+        <span style={{ fontSize: "0.62rem", opacity: 0.8 }}>
+          {est ? "משוער" : ""}{est && missing ? " · " : ""}{missing ? `${missing} בלי מחיר` : ""}
+        </span>
+      )}
+    </div>
+  );
+}
