@@ -1,0 +1,55 @@
+{
+ "started": "2026-11-11T16:05:11+02:00",
+ "ok": false,
+ "files_on_server": 67,
+ "stores": [
+  {
+   "id": "001",
+   "name": "רמב\"ם",
+   "city": "0"
+  },
+  {
+   "id": "002",
+   "name": "ויתקין",
+   "city": "0"
+  },
+  {
+   "id": "003",
+   "name": "קיסריה",
+   "city": "0"
+  },
+  {
+   "id": "004",
+   "name": "ניסן",
+   "city": "0"
+  },
+  {
+   "id": "005",
+   "name": "כרכור",
+   "city": "0"
+  },
+  {
+   "id": "008",
+   "name": "פרדס חנה",
+   "city": "0"
+  },
+  {
+   "id": "009",
+   "name": "נתניה",
+   "city": "0"
+  },
+  {
+   "id": "011",
+   "name": "אור עקיבא",
+   "city": "0"
+  }
+ ],
+ "store": {
+  "id": "005",
+  "name": "כרכור",
+  "city": "0"
+ },
+ "error": "RuntimeError: No PriceFull file for store 005",
+ "trace": "Traceback (most recent call last):\n  File \"/home/runner/work/-Pollitzer-Shopping-List/-Pollitzer-Shopping-List/prices/update_prices.py\", line 151, in main\n    src, items = read_items(ftp, names, store[\"id\"])\n                 ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/runner/work/-Pollitzer-Shopping-List/-Pollitzer-Shopping-List/prices/update_prices.py\", line 115, in read_items\n    raise RuntimeError(\"No PriceFull file for store %s\" % store_id)\nRuntimeError: No PriceFull file for store 005\n",
+ "finished": "2026-11-11T16:05:14+02:00"
+}
