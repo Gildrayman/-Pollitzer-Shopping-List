@@ -2014,6 +2014,15 @@ export default function ShoppingList() {
         .pick-row { transition: background .12s; }
         .pick-row:hover { background: #2430260d; }
         .flash-row { background: #F5D98B88 !important; transition: background .3s; }
+        /* Meat and fish: units, kilos, price and total in one line, with narrower controls. */
+        .meat-row { gap: 5px !important; padding-left: 4px !important; padding-right: 4px !important; }
+        .meat-row .qty-col { flex-direction: row !important; gap: 4px !important; }
+        .meat-row [aria-label^="הגדל"], .meat-row [aria-label^="הקטן"] { width: 20px !important; }
+        .meat-row input[inputmode="numeric"] { width: 22px !important; }
+        .meat-row .pr-price { flex-basis: 46px !important; }
+        .meat-row .pr-total { flex-basis: 44px !important; }
+        .meat-row .pr-space { flex-basis: 95px !important; }
+        .meat-row .pr-price > span:first-child, .meat-row .pr-total > span:first-child { font-size: 0.7rem !important; }
         @media (max-width: 400px) {
           .final-top-title { font-size: 1.4rem !important; }
           .final-top-btn { padding: 7px 12px !important; font-size: 0.78rem !important; }
@@ -2346,7 +2355,7 @@ export default function ShoppingList() {
             </div>
           ) : (
           <div style={styles.pickScroll}>
-            <div className="pick-row" style={styles.pickRow}>
+            <div className={`pick-row${activeTab === KG_CATEGORY ? " meat-row" : ""}`} style={styles.pickRow}>
               <button
                 onClick={addCustomAndReset}
                 disabled={!customPick.trim()}
@@ -2361,7 +2370,7 @@ export default function ShoppingList() {
                 placeholder="הוסף ידנית..."
                 style={styles.customPickInput}
               />
-              <span style={styles.qtyCol}>
+              <span className="qty-col" style={styles.qtyCol}>
                 <WithUnitsLabel show={activeTab === KG_CATEGORY}>
                   <QtyStepper
                     qty={customQty}
@@ -2390,7 +2399,7 @@ export default function ShoppingList() {
               // Chosen by kilos (units 0) counts as chosen too.
               const inList = alreadyInList(item.name);
               return (
-                <div key={item.origName} className={`pick-row${flashName === item.name.trim() ? " flash-row" : ""}`} data-name={item.name.trim()} style={styles.pickRow}>
+                <div key={item.origName} className={`pick-row${activeTab === KG_CATEGORY ? " meat-row" : ""}${flashName === item.name.trim() ? " flash-row" : ""}`} data-name={item.name.trim()} style={styles.pickRow}>
                   <button
                     onClick={() => toggleCheck(item.name, activeTab)}
                     style={{ ...styles.pickCheck, borderColor: inList ? catInfo(activeTab).color : "#24302655", background: inList ? catInfo(activeTab).color : "transparent", cursor: "pointer" }}
@@ -2410,7 +2419,7 @@ export default function ShoppingList() {
                     <X size={14} />
                   </button>
                   {/* Units, and in meat and fish the kilos under them, so price and total fit beside. */}
-                  <span style={styles.qtyCol}>
+                  <span className="qty-col" style={styles.qtyCol}>
                     <WithUnitsLabel show={activeTab === KG_CATEGORY}>
                       <QtyStepper
                         qty={qty}

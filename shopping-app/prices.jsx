@@ -182,7 +182,7 @@ export function PriceTag({ name }) {
 
   if (draft !== null) {
     return (
-      <span style={{ ...box, gap: 2, cursor: "default" }}>
+      <span className="pr-price" style={{ ...box, gap: 2, cursor: "default" }}>
         <input
           autoFocus type="text" inputMode="decimal" value={draft} placeholder="₪"
           onChange={(e) => setDraft(e.target.value.replace(/[^\d.,]/g, "").slice(0, 7))}
@@ -202,7 +202,7 @@ export function PriceTag({ name }) {
 
   if (!p) {
     return (
-      <button type="button" onClick={start} style={{ ...box, color: "#B5BBAF" }} aria-label={`הוסף מחיר משוער ל${key}`}>
+      <button type="button" className="pr-price" onClick={start} style={{ ...box, color: "#B5BBAF" }} aria-label={`הוסף מחיר משוער ל${key}`}>
         <span style={{ fontSize: "0.72rem" }}>+ ₪</span>
         <span style={{ fontSize: "0.56rem" }}>מחיר</span>
       </button>
@@ -210,7 +210,7 @@ export function PriceTag({ name }) {
   }
   return (
     <button
-      type="button" onClick={start}
+      type="button" className="pr-price" onClick={start}
       title={own ? "מחיר משוער שהוקלד ידנית (לחיצה לעריכה)" : p[3] ? `מחיר של "${p[3]}" בפוליצר כרכור, נמצא לפי השם (לחיצה לעריכה)` : "מחיר לפי מחירון פוליצר כרכור (לחיצה לעריכה)"}
       aria-label={`מחיר משוער ${fmt(p[0])} שקלים ${p[1] === "k" ? "לקילו" : "ליחידה"}, לחיצה לעריכה`}
       style={{ ...box, background: "#3E7C5912", outline: own ? "1px dashed #3E7C59" : "none" }}
@@ -250,9 +250,9 @@ export function TotalTag({ name, units = 0, kg = 0 }) {
   useEffect(() => { ensureLoaded(); subs.add(setOv); return () => subs.delete(setOv); }, []);
   const t = rowTotal(name, units, kg);
   const box = { flex: "0 0 50px", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", lineHeight: 1.1, fontFamily: "'Heebo', sans-serif", color: "#243026" };
-  if (!t || !(t.sum > 0)) return <span style={{ ...box, color: "#B5BBAF", fontSize: "0.72rem" }} aria-hidden="true">—</span>;
+  if (!t || !(t.sum > 0)) return <span className="pr-total" style={{ ...box, color: "#B5BBAF", fontSize: "0.72rem" }} aria-hidden="true">—</span>;
   return (
-    <span style={box} aria-label={`${t.est ? "סך הכל משוער" : "סך הכל"} ${fmt(t.sum)} שקלים`}>
+    <span className="pr-total" style={box} aria-label={`${t.est ? "סך הכל משוער" : "סך הכל"} ${fmt(t.sum)} שקלים`}>
       <span style={{ fontSize: "0.78rem", fontWeight: 700 }}>₪{fmt(t.sum)}</span>
       <span style={{ fontSize: "0.56rem", color: "#7C8574" }}>{t.est ? "סה״כ משוער" : "סה״כ"}</span>
     </span>
@@ -275,5 +275,5 @@ export function PriceCell({ name, units = 0, kg = 0, stack = false }) {
 // Empty space the width of PriceCell, for rows that have none (the add-by-hand row),
 // so the amount columns line up.
 export function PriceCellSpace({ stack = false }) {
-  return <span style={{ flex: `0 0 ${stack ? 54 : 114}px` }} aria-hidden="true" />;
+  return <span className="pr-space" style={{ flex: `0 0 ${stack ? 54 : 114}px` }} aria-hidden="true" />;
 }
