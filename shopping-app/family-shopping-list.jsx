@@ -2361,23 +2361,25 @@ export default function ShoppingList() {
                 placeholder="הוסף ידנית..."
                 style={styles.customPickInput}
               />
-              <WithUnitsLabel show={activeTab === KG_CATEGORY}>
-                <QtyStepper
-                  qty={customQty}
-                  disabled={!customPick.trim()}
-                  onInc={incrementCustom}
-                  onDec={decrementCustom}
-                  onSet={(n) => customPick.trim() && setListQty(customPick.trim(), activeTab, n)}
-                />
-              </WithUnitsLabel>
-              {activeTab === KG_CATEGORY && (
-                <KgStepper
-                  kg={customPick.trim() ? getListKg(customPick.trim()) : 0}
-                  disabled={!customPick.trim()}
-                  onSet={(n) => customPick.trim() && setListKg(customPick.trim(), activeTab, n)}
-                />
-              )}
-              <PriceCellSpace stack={activeTab === KG_CATEGORY} />
+              <span style={styles.qtyCol}>
+                <WithUnitsLabel show={activeTab === KG_CATEGORY}>
+                  <QtyStepper
+                    qty={customQty}
+                    disabled={!customPick.trim()}
+                    onInc={incrementCustom}
+                    onDec={decrementCustom}
+                    onSet={(n) => customPick.trim() && setListQty(customPick.trim(), activeTab, n)}
+                  />
+                </WithUnitsLabel>
+                {activeTab === KG_CATEGORY && (
+                  <KgStepper
+                    kg={customPick.trim() ? getListKg(customPick.trim()) : 0}
+                    disabled={!customPick.trim()}
+                    onSet={(n) => customPick.trim() && setListKg(customPick.trim(), activeTab, n)}
+                  />
+                )}
+              </span>
+              <PriceCellSpace />
             </div>
 
             {catalogFor(activeTab).length === 0 && (
@@ -2407,18 +2409,21 @@ export default function ShoppingList() {
                   >
                     <X size={14} />
                   </button>
-                  <WithUnitsLabel show={activeTab === KG_CATEGORY}>
-                    <QtyStepper
-                      qty={qty}
-                      onInc={() => incrementListItem(item.name, activeTab)}
-                      onDec={() => decrementListItem(item.name)}
-                      onSet={(n) => setListQty(item.name, activeTab, n)}
-                    />
-                  </WithUnitsLabel>
-                  {activeTab === KG_CATEGORY && (
-                    <KgStepper kg={getListKg(item.name)} onSet={(n) => setListKg(item.name, activeTab, n)} />
-                  )}
-                  <PriceCell name={item.name} units={qty} kg={activeTab === KG_CATEGORY ? getListKg(item.name) : 0} stack={activeTab === KG_CATEGORY} />
+                  {/* Units, and in meat and fish the kilos under them, so price and total fit beside. */}
+                  <span style={styles.qtyCol}>
+                    <WithUnitsLabel show={activeTab === KG_CATEGORY}>
+                      <QtyStepper
+                        qty={qty}
+                        onInc={() => incrementListItem(item.name, activeTab)}
+                        onDec={() => decrementListItem(item.name)}
+                        onSet={(n) => setListQty(item.name, activeTab, n)}
+                      />
+                    </WithUnitsLabel>
+                    {activeTab === KG_CATEGORY && (
+                      <KgStepper kg={getListKg(item.name)} onSet={(n) => setListKg(item.name, activeTab, n)} />
+                    )}
+                  </span>
+                  <PriceCell name={item.name} units={qty} kg={activeTab === KG_CATEGORY ? getListKg(item.name) : 0} />
                 </div>
               );
             })}
@@ -3029,6 +3034,7 @@ const styles = {
   pickHint: { marginInlineStart: "auto", color: "#7C8574", fontSize: "0.72rem" },
   kgWrap: { display: "flex", flexDirection: "column", alignItems: "center", gap: 1, flex: "0 0 auto" },
   kgLabel: { fontSize: "0.68rem", color: "#7C8574", lineHeight: 1 },
+  qtyCol: { display: "flex", flexDirection: "column", alignItems: "center", gap: 4, flex: "0 0 auto" },
   stepper: { display: "flex", alignItems: "center", gap: 0, flex: "0 0 auto", background: "#FFFFFF", border: "1px solid #24302633", borderRadius: 8, overflow: "hidden" },
   stepperBtn: { width: 26, height: 26, display: "flex", alignItems: "center", justifyContent: "center", background: "transparent", border: "none", color: "#243026", fontSize: "1rem", fontWeight: 600, cursor: "pointer", lineHeight: 1 },
   stepperInput: { width: 34, height: 26, textAlign: "center", border: "none", background: "transparent", color: "#243026", fontFamily: "'Heebo', sans-serif", fontSize: 16, fontWeight: 600, padding: 0, outline: "none" },
