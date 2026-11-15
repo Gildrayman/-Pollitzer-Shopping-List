@@ -158,7 +158,7 @@ function shown(name, p) {
 }
 const UNIT_LABEL = { k: "לק״ג", u: "ליח׳", g: "ל-100 גר׳" };
 // Products whose price is for a pack of several units: the label says "ל-12 יח׳" instead of "ליח׳".
-const PACKS = { "ביצים L": 12, "מוטי עגבניות מרוסקות": 3, "פיתות כוסמין": 10 };
+const PACKS = { "ביצים L": 12, "מוטי עגבניות מרוסקות": 3, "פיתות כוסמין": 10, "יוגורט ביו דנונה": 8 };
 const PACK_WORDS = [[/רביעיי?ת/, 4], [/שישיי?ת/, 6], [/שלישיי?ת/, 3], [/זוג|צמד/, 2]];
 // Units in one pack, from the list above or from the store item's name ("רביעיית טונה"); 0 if single.
 function packOf(name, p) {
