@@ -157,6 +157,18 @@ function shown(name, p) {
   return p || null;
 }
 const UNIT_LABEL = { k: "לק״ג", u: "ליח׳", g: "ל-100 גר׳" };
+// Products whose price is for a pack of several units: the label says "ל-12 יח׳" instead of "ליח׳".
+const PACKS = { "ביצים L": 12, "מוטי עגבניות מרוסקות": 3, "פיתות כוסמין": 10 };
+const PACK_WORDS = [[/רביעיי?ת/, 4], [/שישיי?ת/, 6], [/שלישיי?ת/, 3], [/זוג|צמד/, 2]];
+// Units in one pack, from the list above or from the store item's name ("רביעיית טונה"); 0 if single.
+function packOf(name, p) {
+  if (!p || p[1] !== "u") return 0;
+  if (PACKS[name]) return PACKS[name];
+  const src = `${name} ${p[3] || ""}`;
+  for (const [re, n] of PACK_WORDS) if (re.test(src)) return n;
+  return 0;
+}
+const unitLabel = (name, p) => { const n = packOf(name, p); return n > 1 ? `ל-${n} יח׳` : UNIT_LABEL[p[1]] || "ליח׳"; };
 const UNIT_SAY = { k: "לקילו", u: "ליחידה", g: "ל-100 גרם" };
 const NEXT_UNIT = { u: "k", k: "g", g: "u" };
 // Price per kilo of an entry that is per kilo or per 100 grams; 0 if it is per unit.
@@ -226,11 +238,11 @@ export function PriceTag({ name }) {
     <button
       type="button" className="pr-price" onClick={start}
       title={own ? "מחיר משוער שהוקלד ידנית (לחיצה לעריכה)" : p[3] ? `מחיר של "${p[3]}" בפוליצר כרכור, נמצא לפי השם (לחיצה לעריכה)` : "מחיר לפי מחירון פוליצר כרכור (לחיצה לעריכה)"}
-      aria-label={`מחיר משוער ${fmt(p[0])} שקלים ${UNIT_SAY[p[1]] || "ליחידה"}, לחיצה לעריכה`}
+      aria-label={`מחיר משוער ${fmt(p[0])} שקלים ${packOf(key, p) > 1 ? `למארז של ${packOf(key, p)}` : UNIT_SAY[p[1]] || "ליחידה"}, לחיצה לעריכה`}
       style={{ ...box, background: "#3E7C5912", outline: own ? "1px dashed #3E7C59" : "none" }}
     >
       <span style={{ fontSize: "0.76rem", fontWeight: 700 }}>₪{fmt(p[0])}</span>
-      <span style={{ fontSize: "0.56rem", color: "#7C8574" }}>{UNIT_LABEL[p[1]] || "ליח׳"}</span>
+      <span style={{ fontSize: "0.56rem", color: "#7C8574" }}>{unitLabel(key, p)}</span>
     </button>
   );
 }
