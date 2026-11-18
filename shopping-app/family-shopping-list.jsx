@@ -927,30 +927,54 @@ export default function ShoppingList() {
   ].map((p) => ({ ...p, origName: p.name, name: displayName(p.name) })).sort(byName);
 
   // Renames a product everywhere: in the catalog, on the current list, and its note follows it.
+  // If the new name already belongs to another product (for example "פטריות"), the two become
+  // one product with that name: after a confirmation the renamed one leaves the catalog
+  // (a built-in one can be brought back with "החזרת מוצרים שנמחקו"), and on the list its
+  // quantity joins the other one's.
   const renameProduct = async (currentName, newName) => {
     const from = currentName.trim();
     const to = newName.trim();
     if (!to || to === from) return;
-    const taken = CATEGORIES.some((c) => catalogFor(c.id).some((p) => p.name.trim() === to)) || alreadyInList(to);
-    if (taken) return;
-    let origName = null;
-    for (const c of CATEGORIES) {
-      const hit = catalogFor(c.id).find((p) => p.name.trim() === from);
-      if (hit) { origName = hit.origName.trim(); break; }
-    }
+    const findIn = (name) => {
+      for (const c of CATEGORIES) {
+        const hit = catalogFor(c.id).find((p) => p.name.trim() === name);
+        if (hit) return { ...hit, cat: c.id };
+      }
+      return null;
+    };
+    const source = findIn(from);
+    const target = findIn(to);
+    const fromItem = items.find((it) => it.name.trim() === from && !it.done);
+    const toItem = items.find((it) => it.name.trim() === to && !it.done);
+    const merging = !!target && !(source && source.origName === target.origName);
+
+    if (merging && source && !window.confirm(`כבר יש מוצר בשם "${to}". לאחד את "${from}" איתו?`)) return;
+
     const note = getCatalogNote(from);
-    if (origName) {
-      const nextNames = { ...nameOverrides, [origName]: to };
+    if (source && !merging) {
+      const nextNames = { ...nameOverrides, [source.origName.trim()]: to };
       setNameMap(nextNames);
       try { await window.storage.set(NAMES_KEY, JSON.stringify(nextNames), true); } catch (e) { console.error("שגיאת שמירה", e); }
     }
-    if (note) {
+    if (source && merging) {
+      if (source.custom) persistCustom(customProducts.filter((p) => p.id !== source.id));
+      else persistHidden([...hiddenProducts, source.origName.trim()]);
+    }
+    // The note follows the name, unless the product it joins already has its own note.
+    if (note && (!merging || !getCatalogNote(to))) {
       const nextNotes = { ...noteOverrides, [to]: note };
       setNoteMap(nextNotes);
       try { await window.storage.set(NOTES_KEY, JSON.stringify(nextNotes), true); } catch (e) { console.error("שגיאת שמירה", e); }
     }
-    if (items.some((it) => it.name.trim() === from)) {
-      persist(items.map((it) => (it.name.trim() === from ? { ...it, name: to } : it)));
+    if (fromItem && toItem && fromItem.id !== toItem.id) {
+      // Both are on the list: one line with both quantities (units or kilos, as the product has).
+      let joined = toItem;
+      if (kgOf(toItem) > 0 && kgOf(fromItem) > 0) joined = withKg(toItem, Math.min(MAX_KG, kgOf(toItem) + kgOf(fromItem)));
+      else if (unitsOf(toItem) > 0 && unitsOf(fromItem) > 0) joined = withUnits(toItem, Math.min(20, unitsOf(toItem) + unitsOf(fromItem)));
+      persist(items.filter((it) => it.id !== fromItem.id).map((it) => (it.id === toItem.id ? joined : it)));
+    } else if (items.some((it) => it.name.trim() === from)) {
+      const cat = target ? target.cat : null;
+      persist(items.map((it) => (it.name.trim() === from ? { ...it, name: to, ...(cat ? { category: cat } : {}) } : it)));
     }
   };
 
