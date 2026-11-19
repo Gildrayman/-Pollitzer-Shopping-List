@@ -17,15 +17,54 @@ const CATEGORIES = [
   { id: "meat", label: "בשר ודגים", color: "#C1554B", dark: "#8C3931" },
   { id: "bakery", label: "מאפים", color: "#E8935A", dark: "#B8683A" },
   { id: "pantry", label: "מזווה ויבשים", color: "#D4A94A", dark: "#A6812F" },
-  { id: "household", label: "ניקיון ובית", color: "#8FA6C9", dark: "#556F94" },
+  { id: "bath", label: "רחצה ופארם", color: "#D99BB8", dark: "#A3607F" },
+  { id: "cleaning", label: "חומרי ניקוי", color: "#8FA6C9", dark: "#556F94" },
   { id: "other", label: "שונות", color: "#B7A8C9", dark: "#7E6C95" },
 ];
 
-const catInfo = (id) => CATEGORIES.find((c) => c.id === id) || CATEGORIES[CATEGORIES.length - 1];
+// The old tab "ניקיון ובית" (id "household") was split in two on 19.11.2026:
+// "רחצה ופארם" (bath) and "חומרי ניקוי" (cleaning). Everything saved with the old
+// tab (lists, saved lists, history, products the family added or moved, and data that
+// still arrives from a phone with an older version) is sorted by the product's name
+// when it is read, so nothing is lost and nobody needs to do anything.
+const OLD_HOUSEHOLD = "household";
+// Words that always mean cleaning ("סבון כלים", "מגבונים לניקוי"), then bath and pharmacy
+// words, then other cleaning words. Anything not recognised stays with cleaning.
+const CLEANING_STRONG = ["כלים", "כביסה", "רצפ", "אסל", "ניקוי", "ניקיון", "אקונומיקה", "מדיח"];
+const BATH_WORDS = ["שמפו", "שיער", "רחצה", "סבון", "שיניים", "קיסמ", "קסמיות", "אוזניים", "דאודורנט", "דיאודורנט", "קרם", "תחליב", "טואלט", "טישו", "ממחטות", "מגבונים", "חיתול", "תחבושות", "טמפון", "פדים", "גילוח", "ג׳ילט", "צמר גפן", "פלסטר", "תרופ", "אקמול", "נורופן", "ויטמין", "מי פה", "דנטלי", "בושם", "איפור", "שפתון", "קרם הגנה", "פארם", "היגיינ", "טיפוח", "ספוגית"];
+const CLEANING_WORDS = ["קאלק", "אבנית", "פוליויקס", "סנו", "ספוג", "סמרטוט", "מטלית", "מטליות", "זבל", "אשפה", "כלור", "שומנים", "מטאטא", "נייר כסף", "ניילון נצמד", "נייר אפייה", "מגבת נייר", "מגבות נייר", "מטהר", "חלונות", "כתמים", "מלבין", "פלמוליב", "פיירי", "פרסיל", "טייד", "מרכך"];
+const hasWord = (t, words) => words.some((w) => t.includes(w));
+export function splitHousehold(name) {
+  const t = String(name || "").replace(/'/g, "׳");
+  if (hasWord(t, CLEANING_STRONG)) return "cleaning";
+  if (hasWord(t, BATH_WORDS)) return "bath";
+  return "cleaning";
+}
+// A product that is in the built-in catalog goes where the catalog has it now
+// (also under a name the family gave it); any other product is sorted by its words.
+const fixCat = (name, cat) => {
+  if (cat !== OLD_HOUSEHOLD) return cat;
+  const t = String(name || "").trim();
+  for (const home of ["bath", "cleaning"]) {
+    if ((COMMON_ITEMS[home] || []).some((p) => p.name === t || displayName(p.name).trim() === t)) return home;
+  }
+  return splitHousehold(t);
+};
+const fixItems = (arr) => (Array.isArray(arr) ? arr.map((it) => (it && it.category === OLD_HOUSEHOLD ? { ...it, category: fixCat(it.name, it.category) } : it)) : arr);
+const fixSavedLists = (arr) => (Array.isArray(arr) ? arr.map((l) => (l && Array.isArray(l.items) && l.items.some((it) => it && it.category === OLD_HOUSEHOLD) ? { ...l, items: fixItems(l.items) } : l)) : arr);
+const fixMoves = (m) => {
+  if (!m || typeof m !== "object") return m;
+  if (!Object.values(m).includes(OLD_HOUSEHOLD)) return m;
+  const out = {};
+  for (const [k, v] of Object.entries(m)) out[k] = fixCat(k, v);
+  return out;
+};
+
+const catInfo = (id) => CATEGORIES.find((c) => c.id === (id === OLD_HOUSEHOLD ? "cleaning" : id)) || CATEGORIES[CATEGORIES.length - 1];
 
 // Every list is ordered by department (in the tabs' order), then alphabetically (א-ב) inside it.
 const byName = (a, b) => String(a.name || "").trim().localeCompare(String(b.name || "").trim(), "he", { sensitivity: "base", numeric: true });
-const deptIndex = (cat) => { const i = CATEGORIES.findIndex((c) => c.id === cat); return i < 0 ? CATEGORIES.length : i; };
+const deptIndex = (cat) => { const i = CATEGORIES.findIndex((c) => c.id === (cat === OLD_HOUSEHOLD ? "cleaning" : cat)); return i < 0 ? CATEGORIES.length : i; };
 const byDeptThenName = (a, b) => deptIndex(a.category) - deptIndex(b.category) || byName(a, b);
 const sortByDept = (arr) => arr.slice().sort(byDeptThenName);
 
@@ -137,7 +176,14 @@ const COMMON_ITEMS = {
     { name: "אבקת מרק עוף", note: "ויטה" },
     { name: "קוקוס טחון", note: "" },
   ],
-  household: [
+  bath: [
+    { name: "נייר טואלט", note: "3 שכבות" },
+    { name: "קסמיות אוזניים", note: "איכות גבוהה" },
+    { name: "משחת שיניים", note: "פרודונטקס רגילה" },
+    { name: "שמפו שמן מרוקאי", note: "" },
+    { name: "תחליב רחצה", note: "שמן מרוקאי" },
+  ],
+  cleaning: [
     { name: "אקונומיקה", note: "סנו ז׳אבל" },
     { name: "אבקת כביסה", note: "טייד" },
     { name: "מרכך כביסה", note: "מקסימה, CALM" },
@@ -145,11 +191,6 @@ const COMMON_ITEMS = {
     { name: "סנו לניקוי רצפות", note: "Green Power" },
     { name: "ספריי אנטי קאלק", note: "" },
     { name: "פוליויקס לרצפות", note: "" },
-    { name: "נייר טואלט", note: "3 שכבות" },
-    { name: "קסמיות אוזניים", note: "איכות גבוהה" },
-    { name: "משחת שיניים", note: "פרודונטקס רגילה" },
-    { name: "שמפו שמן מרוקאי", note: "" },
-    { name: "תחליב רחצה", note: "שמן מרוקאי" },
     { name: "סנו לניקוי אסלות", note: "" },
     { name: "ספוג לכלים", note: "סנו, חזק" },
     { name: "סמרטוטי רצפה", note: "סנו" },
@@ -559,8 +600,14 @@ export default function ShoppingList() {
 
   const refreshList = useCallback(async () => {
     try {
+      const res = await window.storage.get(NAMES_KEY, true);
+      if (res && res.value) { const m = JSON.parse(res.value); nameOverrides = m; setNameMap(m); }
+    } catch {
+      // no renamed products yet
+    }
+    try {
       const res = await window.storage.get(STORAGE_KEY, true);
-      if (res && res.value) setItems(JSON.parse(res.value));
+      if (res && res.value) setItems(fixItems(JSON.parse(res.value)));
     } catch {
       // Storage key not created yet, or a transient read hiccup — either way,
       // never wipe items the user already selected. Just skip this refresh.
@@ -571,18 +618,12 @@ export default function ShoppingList() {
     } catch {
       // no edited notes yet
     }
-    try {
-      const res = await window.storage.get(NAMES_KEY, true);
-      if (res && res.value) setNameMap(JSON.parse(res.value));
-    } catch {
-      // no renamed products yet
-    }
   }, []);
 
   const refreshShared = useCallback(async () => {
     try {
       const res = await window.storage.get(SAVED_KEY, true);
-      if (res && res.value) setSavedLists(JSON.parse(res.value));
+      if (res && res.value) setSavedLists(fixSavedLists(JSON.parse(res.value)));
     } catch {
       // no saved lists yet
     }
@@ -594,7 +635,7 @@ export default function ShoppingList() {
     }
     try {
       const res = await window.storage.get(CUSTOM_KEY, true);
-      if (res && res.value) setCustomProducts(JSON.parse(res.value));
+      if (res && res.value) setCustomProducts(fixItems(JSON.parse(res.value)));
     } catch {
       // no custom products yet
     }
@@ -606,7 +647,7 @@ export default function ShoppingList() {
     }
     try {
       const res = await window.storage.get(MOVES_KEY, true);
-      if (res && res.value) setMoveMap(JSON.parse(res.value));
+      if (res && res.value) setMoveMap(fixMoves(JSON.parse(res.value)));
     } catch {
       // no moved products yet
     }
@@ -746,7 +787,7 @@ export default function ShoppingList() {
   };
 
   const openHistory = () => {
-    setHistoryList(readHistory().slice().reverse());
+    setHistoryList(readHistory().map((h) => ({ ...h, items: fixItems(h.items) })).reverse());
     setOpenHistoryAt(null);
     setConfirmRestoreAt(null);
     setShowHistory(true);
